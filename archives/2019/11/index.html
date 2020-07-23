@@ -221,6 +221,29 @@
   
 
   
+    <!-- APlayer 音乐播放器 -->
+    <div id="aplayer"></div>
+    <script defer src="https://cdn.staticfile.org/aplayer/1.10.1/APlayer.min.js" ></script>
+<link  rel="stylesheet" href="https://cdn.staticfile.org/aplayer/1.10.1/APlayer.min.css" />
+<script type="text/javascript">
+  var oldLoadAp = window.onload;
+  window.onload = function () {
+    oldLoadAp && oldLoadAp();
+
+    new APlayer({
+      container: document.getElementById('aplayer'),
+      fixed: true,
+      autoplay: 'false' === 'true',
+      loop: 'all',
+      order: 'list',
+      theme: '#b7daff',
+      preload: 'none',
+      audio: [{"name":"最长的电影","artist":"周杰伦","url":"/songs/周杰伦 - 最长的电影.mp3","cover":"/img/zjl.jpg"},{"name":"告白气球","artist":"周杰伦","url":"/songs/告白气球.mp3","cover":"/img/zjl.jpg"},{"name":"回到过去","artist":"周杰伦","url":"/songs/回到过去 - 周杰伦.mp3","cover":"/img/zjl.jpg"},{"name":"可乐","artist":"周杰伦","url":"/songs/可乐.mp3","cover":"/img/zjl.jpg"},{"name":"明明就","artist":"周杰伦","url":"/songs/明明就.mp3","cover":"/img/zjl.jpg"},{"name":"可乐","artist":"周杰伦","url":"/songs/赵浴辰 - 可乐.mp3","cover":"/img/zjl.jpg"},{"name":"稻香","artist":"周杰伦","url":"/songs/周杰伦 - 稻香.mp3","cover":"/img/zjl.jpg"},{"name":"晴天","artist":"周杰伦","url":"/songs/周杰伦 - 晴天.mp3","cover":"/img/zjl.jpg"},{"name":"算什么男人","artist":"周杰伦","url":"/songs/周杰伦 - 算什么男人.mp3","cover":"/img/zjl.jpg"},{"name":"夜曲","artist":"周杰伦","url":"/songs/周杰伦 - 夜曲.mp3","cover":"/img/zjl.jpg"}]
+    });
+  }
+</script>
+
+  
 
   
 
@@ -309,6 +332,26 @@
 
 
 
+
+  <script>(function (i, s, o, g, r, a, m) {
+      i['DaoVoiceObject'] = r;
+      i[r] = i[r] ||
+        function () {
+          (i[r].q = i[r].q || []).push(arguments);
+        };
+      i[r].l = 1 * new Date();
+      a = s.createElement(o);
+      m = s.getElementsByTagName(o)[0];
+      a.async = 1;
+      a.src = g;
+      a.charset = 'utf-8';
+      m.parentNode.insertBefore(a, m);
+    })(window, document, 'script', ('https:' === document.location.protocol ? 'https:' : 'http:') + "//widget.daovoice.io/widget/23a592f8.js", 'daovoice');
+    daovoice('init', {
+      app_id: "23a592f8",
+    });
+    daovoice('update');
+  </script>
 
 
 
