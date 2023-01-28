@@ -16,5 +16,480 @@
   
   
   
+  <entry>
+    <title>redis分布式锁</title>
+    <link href="/2021/04/12/redis%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/"/>
+    <url>/2021/04/12/redis%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p>虚拟机中的lock和 synchronized作为锁只能锁住同一个进程的资源，对于不同系统不同进程的资源则需要用到分布式锁来控制资源访问 。</p><h3 id="2-锁的特性"><a href="#2-锁的特性" class="headerlink" title="2.锁的特性"></a>2.锁的特性</h3><ul><li>互斥性。在任意时刻，只有一个客户端能持有锁。</li><li>不会发生死锁。即使有一个客户端在持有锁的期间崩溃而没有主动解锁，也能保证后续其他客户端能加锁。</li><li>具有容错性。只要大部分的Redis节点正常运行，客户端就可以加锁和解锁。</li><li>解铃还须系铃人。加锁和解锁必须是同一个客户端，客户端自己不能把别人加的锁给解了。</li></ul><h3 id="3-代码演示"><a href="#3-代码演示" class="headerlink" title="3.代码演示"></a>3.代码演示</h3><p>redis有set命令  set(key,value,NX,EX, PX )</p><ul><li>key代表着唯一的key</li><li>value代表key的值,这里使用uuid做区别，否则可能发生删除别人的锁情况，key+uuid区分锁</li><li>NX代表着唯一性，如果设置一个已经存在的值会返回nil，否则返回ok</li><li>EX代表超时时间，防止发生死锁，如果一份线程获取了锁结果执行业务报错，没有释放锁，如果没有过期时间机制，一直持有锁就会造成死锁。</li><li>PX 是时间单位毫秒</li></ul><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.UUID;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">RedisLock</span> &#123;<br><br><br>        <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">LOCK_SUCCESS</span> <span class="hljs-operator">=</span> <span class="hljs-string">&quot;OK&quot;</span>;<br>        <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">SET_IF_NOT_EXIST</span> <span class="hljs-operator">=</span> <span class="hljs-string">&quot;NX&quot;</span>;<br>        <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">SET_WITH_EXPIRE_TIME</span> <span class="hljs-operator">=</span> <span class="hljs-string">&quot;PX&quot;</span>;<br><br>        <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">long</span> <span class="hljs-variable">LOCK_TIME</span> <span class="hljs-operator">=</span> <span class="hljs-number">3000</span>;<br><br>        <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">final</span> <span class="hljs-type">String</span> <span class="hljs-variable">LOCK_KEY</span> <span class="hljs-operator">=</span> <span class="hljs-string">&quot;REDIS_TEST_LOCK&quot;</span>;<br><br>        <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">toDo</span><span class="hljs-params">()</span> &#123;<br>            <span class="hljs-type">String</span> <span class="hljs-variable">value</span> <span class="hljs-operator">=</span> UUID.randomUUID().toString();<br>            <span class="hljs-keyword">try</span> &#123;<br>                <span class="hljs-type">String</span> <span class="hljs-variable">result</span> <span class="hljs-operator">=</span> jedis.set(LOCK_KEY, value, SET_IF_NOT_EXIST, SET_WITH_EXPIRE_TIME, LOCK_TIME);<br>                <span class="hljs-comment">// 获取锁成功</span><br>                <span class="hljs-keyword">if</span> (LOCK_SUCCESS.equals(result)) &#123;<br>                    <span class="hljs-comment">// 执行业务操作</span><br>                &#125;<br>            &#125; <span class="hljs-keyword">catch</span> (Exception e) &#123;<br>                e.printStackTrace();<br>            &#125; <span class="hljs-keyword">finally</span> &#123;<br>                <span class="hljs-comment">//  释放锁</span><br>                <span class="hljs-type">String</span> <span class="hljs-variable">currentValue</span> <span class="hljs-operator">=</span> jedis.get(LOCK_KEY);<br>                <span class="hljs-comment">// 谁加的锁谁释放 不能释放别人的锁</span><br>                <span class="hljs-keyword">if</span>(currentValue.equals(value))&#123;<br>                    jedis.del(LOCK_KEY);<br>                &#125;<br>            &#125;<br>        &#125;<br><br><br><br>&#125;<br><br></code></pre></td></tr></table></figure><h3 id="4-存在问题"><a href="#4-存在问题" class="headerlink" title="4.存在问题"></a>4.存在问题</h3><p><strong>续约问题</strong></p><p>  A线程执行一半锁过期了，B线程此时执行获取锁，此时就有两个线程同时持有锁， 我们可以让获得锁的线程开启一个守护线程，用来给快要过期的锁“续约”。 </p><p><strong>集群同步延迟问题</strong></p><p>  用于redis的服务肯定不能是单机，因为单机就不是高可用了，一但挂掉整个分布式锁就没用了。</p><p>在集群场景下，如果A在master拿到了锁,在没有把数据同步到slave时，master挂掉了。B再拿锁就会从slave拿锁，而且会拿到。又出现了两个线程同时拿到锁。</p><h3 id="5-解决办法"><a href="#5-解决办法" class="headerlink" title="5.解决办法"></a>5.解决办法</h3><p>使用 Redisson 框架， Redisson是架设在Redis基础上的一个Java驻内存数据网格（In-Memory Data Grid）。充分的利用了Redis键值数据库提供的一系列优势，基于Java实用工具包中常用接口，为使用者提供了一系列具有分布式特性的常用工具类。 </p>]]></content>
+    
+    
+    <categories>
+      
+      <category>锁</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>redis分布式锁</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>ThreadLocal的理解</title>
+    <link href="/2021/04/11/ThreadLocal%E7%9A%84%E7%90%86%E8%A7%A3/"/>
+    <url>/2021/04/11/ThreadLocal%E7%9A%84%E7%90%86%E8%A7%A3/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p>ThreadLocal从字面上来说是线程的本地存储变量。ThreadLocal的作用就是为每一个线程提供一个独立的变量副本，每一个线程只会改变自己的副本，而不是去影响其他线程的副本。  ThreadLocal与synchronized有本质的区别 ，Synchronized用于线程间的数据共享，而ThreadLocal则用于线程间的数据隔离。 </p><h3 id="2-常用API介绍"><a href="#2-常用API介绍" class="headerlink" title="2.常用API介绍"></a>2.常用API介绍</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">ThreadLocalTest</span> &#123;<br> <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> ThreadLocal&lt;Map&lt;String,String&gt;&gt; threadLocal = ThreadLocal.withInitial(()-&gt;&#123;<br>     <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;AAAA&quot;</span>;<br>    &#125;);<br>    <br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        ThreadLocal&lt;String&gt; threadLocal = <span class="hljs-keyword">new</span> <span class="hljs-title class_">ThreadLocal</span>&lt;&gt;();<br>        threadLocal.set(<span class="hljs-string">&quot;XXXX&quot;</span>);<br>        System.out.println(threadLocal.get());;<br>        threadLocal.remove();<br>        System.out.println(threadLocal.get());;<br>    &#125;<br>&#125;<br></code></pre></td></tr></table></figure><p>Thread是一个泛型类，初始化需要指定类型，set get方法设置和获取值，withInitial方法初始化值，remove清除值，但是不会清除初始化值。</p><h3 id="3-代码演示"><a href="#3-代码演示" class="headerlink" title="3.代码演示"></a>3.代码演示</h3><p>演示ThreadLocal变量线程独立，初始化一个map，一个线程更改了，另一个线程不会被影响。</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.HashMap;<br><span class="hljs-keyword">import</span> java.util.Map;<br><span class="hljs-keyword">import</span> java.util.concurrent.ExecutorService;<br><span class="hljs-keyword">import</span> java.util.concurrent.Executors;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">ThreadLocalTest</span> &#123;<br><br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> ThreadLocal&lt;Map&lt;String,String&gt;&gt; threadLocal = ThreadLocal.withInitial(()-&gt;&#123;<br>        Map&lt;String,String&gt; map = <span class="hljs-keyword">new</span> <span class="hljs-title class_">HashMap</span>&lt;&gt;();<br>        map.put(<span class="hljs-string">&quot;name&quot;</span>,<span class="hljs-string">&quot;张三&quot;</span>);<br>        <span class="hljs-keyword">return</span> map;<br>    &#125;);<br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService</span> <span class="hljs-operator">=</span> Executors.newFixedThreadPool(<span class="hljs-number">4</span>);<br>        executorService.execute(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                Map&lt;String, String&gt; map = threadLocal.get();<br>                System.out.println(map.get(<span class="hljs-string">&quot;name&quot;</span>));<br>                map.put(<span class="hljs-string">&quot;name&quot;</span>,<span class="hljs-string">&quot;李四&quot;</span>);<br>                threadLocal.set(map);<br>                System.out.println(map.get(<span class="hljs-string">&quot;name&quot;</span>));<br>            &#125;<br>        &#125;);<br><br>        executorService.execute(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                Map&lt;String, String&gt; map = threadLocal.get();<br>                System.out.println(map.get(<span class="hljs-string">&quot;name&quot;</span>));<br>            &#125;<br>        &#125;);<br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure><h3 id="4-基本原理"><a href="#4-基本原理" class="headerlink" title="4. 基本原理"></a>4. 基本原理</h3><p>ThreadLocal内部有一个静态内部类，类似于Map用键值对的方式存储每一个线程的变量副本。<strong>ThreadLocal使用不当会导致OOM异常</strong>。</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>ThreadLocal</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>CAS的理解</title>
+    <link href="/2021/04/08/CAS%E7%9A%84%E7%90%86%E8%A7%A3/"/>
+    <url>/2021/04/08/CAS%E7%9A%84%E7%90%86%E8%A7%A3/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p> CAS是Compare-And-Swap的缩写，意思为比较并交换 。即修改一个值时，CAS包含三个参数，需要读写位置的内存地址V，进行比较的预期原值A和将要更新的新值B。CAS是乐观锁的一种体现。</p><h3 id="2-流程分析"><a href="#2-流程分析" class="headerlink" title="2.流程分析"></a>2.流程分析</h3><p>简单解释流程：多线程情况下，线程A要对变量i进行+1操作，先要通过地址V去得到这个参数在主内存中的原值假设为2，对于线程A来说此时预期原值就是2，新值就是3，但是此时刚好有一个线程将主内存i改为了3，那么此时线程A比较预期原值2不等于主内存原值3，此时更新失败，线程A自旋，在从主内存中得到预期原值3，此时刚好没有线程操作i,预期原值与实际值相等（即在线程A操作i变量过程中没有其他线程操作），更新为新值4；</p><h3 id="3-详细分析"><a href="#3-详细分析" class="headerlink" title="3. 详细分析"></a>3. 详细分析</h3><p>JUC包中AtomicInteger原子类中incrementAndGet方法就是利用CAS思想先加1再或者值。底层调了unsafe.getAndAddInt，看一下getAndAddInt的源码</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-comment">// AtomicInteger 中的+1再获取当前值方法 </span><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">final</span> <span class="hljs-type">int</span> <span class="hljs-title function_">getAndIncrement</span><span class="hljs-params">()</span> &#123;<br>        <span class="hljs-keyword">return</span> unsafe.getAndAddInt(<span class="hljs-built_in">this</span>, valueOffset, <span class="hljs-number">1</span>);<br>    &#125;<br><br><span class="hljs-comment">//unsafe方法</span><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">final</span> <span class="hljs-type">int</span> <span class="hljs-title function_">getAndAddInt</span><span class="hljs-params">(Object var1, <span class="hljs-type">long</span> var2, <span class="hljs-type">int</span> var4)</span> &#123;<br>        <span class="hljs-type">int</span> var5;<br>        <span class="hljs-keyword">do</span> &#123;<br>            var5 = <span class="hljs-built_in">this</span>.getIntVolatile(var1, var2);<br>        &#125; <span class="hljs-keyword">while</span>(!<span class="hljs-built_in">this</span>.compareAndSwapInt(var1, var2, var5, var5 + var4));<br><br>        <span class="hljs-keyword">return</span> var5;<br>    &#125;<br><br><span class="hljs-comment">// native 调用底层指令</span><br> <span class="hljs-keyword">public</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">native</span> <span class="hljs-type">boolean</span> <span class="hljs-title function_">compareAndSwapInt</span><span class="hljs-params">(Object var1, <span class="hljs-type">long</span> var2, <span class="hljs-type">int</span> var4, <span class="hljs-type">int</span> var5)</span>;<br></code></pre></td></tr></table></figure><p>其中var1代表当前对象，var2是变量value的内存首地址的偏移量，通过var1和var2可以得到当前变量的值var5,因为是volatile修饰的，所有线程看到的值一致。do while循环，其他线程也会利用var1和var2去获得最新的这个值，判断这个最新值是否和var5相等（即一个线程修改的时候其他线程不会对这个值修改），如果相等则交换为var5 + var4 也就是当前值+1；</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>CAS</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>volatile关键字的理解</title>
+    <link href="/2021/04/06/volatile%E5%85%B3%E9%94%AE%E5%AD%97%E7%9A%84%E7%90%86%E8%A7%A3/"/>
+    <url>/2021/04/06/volatile%E5%85%B3%E9%94%AE%E5%AD%97%E7%9A%84%E7%90%86%E8%A7%A3/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p> volatile就可以说是java虚拟机提供的轻量级的同步机制 。</p><h3 id="2-特性"><a href="#2-特性" class="headerlink" title="2.特性"></a>2.特性</h3><p>volatile修饰的变量具有两个特性：</p><ul><li>可见性：volatile修饰的变量在多个线程之中可见。</li><li>禁止指令重排：编译器某些时刻会对不对结果产生影响的代码的执行顺序做优化，可能导致代码执行顺序与实际不一致，例如：</li></ul><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-type">int</span> a=<span class="hljs-number">0</span>;<span class="hljs-type">int</span> b= <span class="hljs-number">3</span>; <span class="hljs-type">int</span> <span class="hljs-variable">sum</span> <span class="hljs-operator">=</span> a+b;  <br>可能对执行顺序做出改变，但不改变最终结果<br><span class="hljs-type">int</span> b= <span class="hljs-number">3</span>; <span class="hljs-type">int</span> a=<span class="hljs-number">0</span>; <span class="hljs-type">int</span> <span class="hljs-variable">sum</span> <span class="hljs-operator">=</span> a+b;<br><br></code></pre></td></tr></table></figure><h3 id="3-可见性"><a href="#3-可见性" class="headerlink" title="3.可见性"></a>3.可见性</h3><p>因为我们用volatile主要是用它的可见性，所以重点介绍可见性。</p><p>jvm工作流程：</p><ul><li>所有的共享变量都存储再主内存中，共享变量是指类变量和实例变量。</li><li>工作流程：线程对共享变量进行修改时，会拷贝一份放入线程的工作内存中，只会对自己工作内存的变量进行修改，然后再刷回主内存。 由于不同线程拥有各自的工作内存（它们之间不能互相访问），所以它们对某个共享变量值的修改在没有刷回主内存的时候只对自己可见。 这样就可能导致一个线程对共享变量进行修改，但是没有来的及刷回主内存，所以另一个线程可能读取共享变量时值不是最新的。</li><li>volatile作用：当一个线程修改了某个变量的值，其它线程总是能知道这个变量变化 。线程对被volatile修饰的变量进行修改时，会先从主内存拷贝一份放入当前线程的工作内存，然后对工作内存进行修改，然后再刷回主内存，最后会通过CPU 总线嗅探机制告知其他线程该变量副本已经失效，需要重新从主内存中读取。</li></ul><p> <img src="https://pics4.baidu.com/feed/adaf2edda3cc7cd9c7d7b103d472b33aba0e91ef.jpeg?token=31670803a3be1bcbd90a90446c9c2d69&s=5AAC3462C1CFC0E85AD415C20000E0B1" alt="img"> </p><h3 id="4-代码演示"><a href="#4-代码演示" class="headerlink" title="4.代码演示"></a>4.代码演示</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">class</span> <span class="hljs-title class_">Test</span> <span class="hljs-keyword">extends</span> <span class="hljs-title class_">Thread</span> &#123;<br><br>    <span class="hljs-type">boolean</span> <span class="hljs-variable">flag</span> <span class="hljs-operator">=</span> <span class="hljs-literal">true</span>;<br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>        <span class="hljs-keyword">while</span> (flag) &#123;<br>        &#125;<br>        System.out.println(<span class="hljs-string">&quot;子线程flag被改变成了&quot;</span>+flag);<br>    &#125;<br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> <span class="hljs-keyword">throws</span> InterruptedException &#123;<br>        <span class="hljs-type">Test</span> <span class="hljs-variable">t</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Test</span>();<br>        t.start();<br>        Thread.sleep(<span class="hljs-number">1000</span>);<br>        t.flag = <span class="hljs-literal">false</span>;<br>        System.out.println(<span class="hljs-string">&quot;主线程flag被改变成了&quot;</span>+t.flag);<br>    &#125;<br>&#125;<br></code></pre></td></tr></table></figure><p>不使用volatile关键字，程序运行结果是一直在运行不会停止。Thread.sleep(1000);保证了主线程写在子线程读之后。</p><p>主线程开启一个子线程运行，然后睡一秒，子线程先去主内存读取flag变量为ture,然后拷贝到本地内存，此时，主内存醒了，改变值为false，但是子线程读的是本地内存一直为true，所以一直在while循环中。当flag变量用volatile修饰时，主线程改完值刷回主内存会立马通知子线程去主内存中读去新的值为false，代码执行结束。</p><h3 id="5-注意"><a href="#5-注意" class="headerlink" title="5.注意"></a>5.注意</h3><p>volatile无法保证原子性，在并发下对volatile变量的修改时可能是线程不安全的。</p><p>问题来了，既然它可以保证修改的值立即能更新到主存，其他线程也会捕捉到被修改后的值，那么为什么不能保证原子性呢？<br>首先需要了解的是，Java中只有对基本类型变量的赋值和读取是原子操作，如i &#x3D; 1的赋值操作，但是像j &#x3D; i或者i++这样的操作都不是原子操作，因为他们都进行了多次原子操作，比如先读取i的值，再将i的值赋值给j，两个原子操作加起来就不是原子操作了。</p><p>那么volatile 可不可以线程安全？</p><p>可以，可以用volatile+cas就是线程安全，详细可以看一下JUC的原子类，就是基于volatile+cas；</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>volatile</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>CopyOnWriteArrayList</title>
+    <link href="/2021/04/05/CopyOnWriteArrayList/"/>
+    <url>/2021/04/05/CopyOnWriteArrayList/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p>CopyOnWriteArrayList是线程安全的arrayList，在读的时候可以多个线程一起去读，在写的时候会加锁先对原来的数组赋值一份，然后将修改的内容在新数组中完成，最后将引用赋给旧数组。（在复制数组写值时，如果此时有线程读数据，那么会读到旧的数据）</p><h3 id="2-CopyOnWriteArrayList的结构"><a href="#2-CopyOnWriteArrayList的结构" class="headerlink" title="2.CopyOnWriteArrayList的结构"></a>2.CopyOnWriteArrayList的结构</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">final</span> <span class="hljs-keyword">transient</span> <span class="hljs-type">ReentrantLock</span> <span class="hljs-variable">lock</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">ReentrantLock</span>();<br><br> <span class="hljs-comment">/** The array, accessed only via getArray/setArray. */</span><br> <span class="hljs-keyword">private</span> <span class="hljs-keyword">transient</span> <span class="hljs-keyword">volatile</span> Object[] array;<br><br><br> <span class="hljs-keyword">final</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">setArray</span><span class="hljs-params">(Object[] a)</span> &#123;<br>     array = a;<br> &#125;<br><br> <span class="hljs-comment">/**</span><br><span class="hljs-comment">  * Creates an empty list.</span><br><span class="hljs-comment">  */</span><br> <span class="hljs-keyword">public</span> <span class="hljs-title function_">CopyOnWriteArrayList</span><span class="hljs-params">()</span> &#123;<br>     setArray(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Object</span>[<span class="hljs-number">0</span>]);<br> &#125;<br><br> <span class="hljs-keyword">public</span> <span class="hljs-type">boolean</span> <span class="hljs-title function_">add</span><span class="hljs-params">(E e)</span> &#123;<br>     <span class="hljs-keyword">final</span> <span class="hljs-type">ReentrantLock</span> <span class="hljs-variable">lock</span> <span class="hljs-operator">=</span> <span class="hljs-built_in">this</span>.lock;<br>     lock.lock();<br>     <span class="hljs-keyword">try</span> &#123;<br>         Object[] elements = getArray();<br>         <span class="hljs-type">int</span> <span class="hljs-variable">len</span> <span class="hljs-operator">=</span> elements.length;<br>         Object[] newElements = Arrays.copyOf(elements, len + <span class="hljs-number">1</span>);<br>         newElements[len] = e;<br>         setArray(newElements);<br>         <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;<br>     &#125; <span class="hljs-keyword">finally</span> &#123;<br>         lock.unlock();<br>     &#125;<br> &#125;<br></code></pre></td></tr></table></figure><p>实例化CopyOnWriteArrayList时，会初始化一个volitale修饰的数组，确保一个线程修改完，其他线程立马可见。</p><p>写入时，会先加锁，然后复制一份当前数组，将需要添加的值加入新数组，再将旧数组的引用给新数组。CopyOnWriteArrayList的操作和使用方法与ArrayList相同，区别在于CopyOnWriteArrayList线程安全。</p><h3 id="3-建议"><a href="#3-建议" class="headerlink" title="3.建议"></a>3.建议</h3><p>因为CopyOnWriteArrayList的多线程写操作需要复制一份当前数组，且如果数组大的话，效率会很低，所以适合读多写少的场景。所以CopyOnWriteArrayList慎用。</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>CopyOnWriteArrayList</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>mysql中limit优化</title>
+    <link href="/2021/03/12/mysql%E4%B8%ADlimit%E5%AD%98%E5%9C%A8%E7%9A%84%E9%97%AE%E9%A2%98/"/>
+    <url>/2021/03/12/mysql%E4%B8%ADlimit%E5%AD%98%E5%9C%A8%E7%9A%84%E9%97%AE%E9%A2%98/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-使用场景"><a href="#1-使用场景" class="headerlink" title="1.使用场景"></a>1.使用场景</h3><p>   mysql 大数据量分页，有一张300w数据的表要分页查询，当数据量小的适合limit分页没有问题，但是当数据量大时，比如说limit 1100000,10  查询效率急速下降，这是因为mysql会先把这1100010条数据查询出来，再把前1100000条丢掉，这样110W数据其实时不需要的也会查询出来导致效率降低。</p><h3 id="2-解决办法"><a href="#2-解决办法" class="headerlink" title="2.解决办法"></a>2.解决办法</h3><p>1.利用前端传入的当前数据最大的ID ，通过ID先过滤数据 （最大ID可由前端 pageNum和pageIndex 计算）</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">SELECT</span> NAME <span class="hljs-keyword">FROM</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> SN_ID <span class="hljs-operator">&gt;</span> 最大ID limit <span class="hljs-number">110</span> <span class="hljs-number">0000</span>, <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure><ol start="2"><li>ID in 查询</li></ol><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">select</span> NAME <span class="hljs-keyword">FROM</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> SN_ID <span class="hljs-keyword">in</span> ( <span class="hljs-keyword">select</span> SN_ID <span class="hljs-keyword">from</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> sex <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;1&#x27;</span>  ) limit <span class="hljs-number">110</span> <span class="hljs-number">0000</span>, <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure><p>注意：ID必须设置为索引</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>sql调优</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>数据库字段尽量使用NOT NULL</title>
+    <link href="/2021/03/12/%E6%95%B0%E6%8D%AE%E5%BA%93%E5%AD%97%E6%AE%B5%E5%B0%BD%E9%87%8F%E4%BD%BF%E7%94%A8NOT%20NULL/"/>
+    <url>/2021/03/12/%E6%95%B0%E6%8D%AE%E5%BA%93%E5%AD%97%E6%AE%B5%E5%B0%BD%E9%87%8F%E4%BD%BF%E7%94%A8NOT%20NULL/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-使用场景"><a href="#1-使用场景" class="headerlink" title="1.使用场景"></a>1.使用场景</h3><p>   mysql 大数据量分页，有一张300w数据的表要分页查询，当数据量小的适合limit分页没有问题，但是当数据量大时，比如说limit 1100000,10  查询效率急速下降，这是因为mysql会先把这1100010条数据查询出来，再把前1100000条丢掉，这样110W数据其实时不需要的也会查询出来导致效率降低。</p><h3 id="2-解决办法"><a href="#2-解决办法" class="headerlink" title="2.解决办法"></a>2.解决办法</h3><p>1.利用前端传入的当前数据最大的ID ，通过ID先过滤数据 （最大ID可由前端 pageNum和pageIndex 计算）</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">SELECT</span> NAME <span class="hljs-keyword">FROM</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> SN_ID <span class="hljs-operator">&gt;</span> 最大ID limit <span class="hljs-number">110</span> <span class="hljs-number">0000</span>, <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure><ol start="2"><li>ID in 查询</li></ol><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">select</span> NAME <span class="hljs-keyword">FROM</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> SN_ID <span class="hljs-keyword">in</span> ( <span class="hljs-keyword">select</span> SN_ID <span class="hljs-keyword">from</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> sex <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;1&#x27;</span>  ) limit <span class="hljs-number">110</span> <span class="hljs-number">0000</span>, <span class="hljs-number">10</span>;<br></code></pre></td></tr></table></figure><p>注意：ID必须设置为索引</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>表设计</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>mysql时间范围查询索引失效</title>
+    <link href="/2021/03/11/msql%E6%97%B6%E9%97%B4%E8%8C%83%E5%9B%B4%E6%9F%A5%E8%AF%A2%E7%B4%A2%E5%BC%95%E5%A4%B1%E6%95%88/"/>
+    <url>/2021/03/11/msql%E6%97%B6%E9%97%B4%E8%8C%83%E5%9B%B4%E6%9F%A5%E8%AF%A2%E7%B4%A2%E5%BC%95%E5%A4%B1%E6%95%88/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-使用场景"><a href="#1-使用场景" class="headerlink" title="1.使用场景"></a>1.使用场景</h3><p> 对一个表进行SQL时间范围查询，表的数量有大概120W，查询发现耗时很长时间，用EXPLAIN分析之后发现时全表扫描，正常的应该是range类型。</p><p> sql类似为：其中CREATE_TIME字段已经加上了索引，但是仍然全表扫描</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs SQL"><span class="hljs-keyword">SELECT</span> XX <span class="hljs-keyword">FROM</span> TABLE_NAME <span class="hljs-keyword">WHERE</span> CREATE_TIME <span class="hljs-operator">&gt;</span> <span class="hljs-keyword">START</span>  <span class="hljs-keyword">AND</span> CREATE_TIME <span class="hljs-operator">&lt;</span> <span class="hljs-keyword">END</span><br></code></pre></td></tr></table></figure><h3 id="2-解决办法"><a href="#2-解决办法" class="headerlink" title="2.解决办法"></a>2.解决办法</h3><p> 看了一些博客，最终原因是，表中的数据时间太集中为某一段时间，MYSQL查询优化器默认策略为如果走索引查出的数据大于表中数据总量的30%，那么直接认为去全表扫描。</p><p>1.使用 FORCE INDEX (索引名称) 强制走索引</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">SELECT</span> XX <span class="hljs-keyword">FROM</span> TABLE_NAME FORCE INDEX(索引名称)   <span class="hljs-keyword">WHERE</span> CREATE_TIME <span class="hljs-operator">&gt;</span> <span class="hljs-keyword">START</span>  <span class="hljs-keyword">AND</span> CREATE_TIME <span class="hljs-operator">&lt;</span> <span class="hljs-keyword">END</span><br></code></pre></td></tr></table></figure><p>2.分库分表</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>sql调优</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>FutureTask的使用</title>
+    <link href="/2021/02/12/futureTask%E7%9A%84%E4%BD%BF%E7%94%A8/"/>
+    <url>/2021/02/12/futureTask%E7%9A%84%E4%BD%BF%E7%94%A8/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-使用场景"><a href="#1-使用场景" class="headerlink" title="1.使用场景"></a>1.使用场景</h3><p>   我在调一个第三方提供用于检测kafka TOPIC连接是否正确的api时，遇到一个超时问题，接口几分钟才会返回结果，但是在我们的系统时无法容忍的，所以用到了FutureTask的带参调用方法。</p><ol start="2"><li>FutureTask可用于异步获取执行结果或取消执行任务的场景 ；</li><li>FutureTask的带参get方法可用于在指定时间内异步获取执行结果，如果超时，将会抛出TimeOutException;</li><li>FutureTask还可以确保即使调用了多次run方法，它都只会执行一次Runnable或者Callable任务 ;</li></ol><h3 id="2-FutureTask的结构"><a href="#2-FutureTask的结构" class="headerlink" title="2.FutureTask的结构"></a>2.FutureTask的结构</h3><p> FutureTask实现了RunnableFuture接口，而RunnableFuture继承了Runnable和Future，也就是说FutureTask既是Runnable，也是Future。 可以直接调用run方法，或者由线程池执行。</p><p>下面看一下FutureTask的API：</p><ul><li>boolean cancel(boolean mayInterruptInRunning) 取消一个任务，并返回取消结果。参数表示是否中断线程；</li><li>boolean isCancelled() 判断任务是否被取消；</li><li>Boolean isDone() 　　 判断当前任务是否执行完毕，包括正常执行完毕、执行异常或者任务取消；</li><li>V get() 获取任务执行结果，任务结束之前会阻塞；</li><li>V get(long timeout, TimeUnit unit) 在指定时间内尝试获取执行结果。若超时则抛出超时异常；</li></ul><h3 id="3-代码示例"><a href="#3-代码示例" class="headerlink" title="3.代码示例"></a>3.代码示例</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.concurrent.*;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">FutureTaskTest</span> &#123;<br><br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        FutureTaskTest.test1();<br>    &#125;<br><br>    <span class="hljs-comment">/**</span><br><span class="hljs-comment">     * <span class="hljs-doctag">@Description</span> 测试异步超时结果</span><br><span class="hljs-comment">     * <span class="hljs-doctag">@author</span> liuhu</span><br><span class="hljs-comment">     * <span class="hljs-doctag">@param</span></span><br><span class="hljs-comment">     * <span class="hljs-doctag">@date</span> 2021/4/6 10:37</span><br><span class="hljs-comment">     * <span class="hljs-doctag">@return</span> void</span><br><span class="hljs-comment">     */</span><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">test1</span><span class="hljs-params">()</span>&#123;<br>        <span class="hljs-comment">// 为了简便 ，建议使用ThreadPoolExecutor 构建线程池</span><br>        <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService</span> <span class="hljs-operator">=</span> Executors.newFixedThreadPool(<span class="hljs-number">4</span>);<br>        FutureTask&lt;String&gt; futureTask = <span class="hljs-keyword">new</span> <span class="hljs-title class_">FutureTask</span>&lt;&gt;(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Callable</span>&lt;String&gt;() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> String <span class="hljs-title function_">call</span><span class="hljs-params">()</span> <span class="hljs-keyword">throws</span> Exception &#123;<br>                Thread.sleep(<span class="hljs-number">30000</span>);<br>                <span class="hljs-comment">// 这里执行你的业务逻辑</span><br>                <span class="hljs-keyword">return</span> <span class="hljs-string">&quot;执行了&quot;</span>;<br>            &#125;<br>        &#125;);<br>        executorService.submit(futureTask);<br>        <span class="hljs-comment">// 10秒中获取异步结果</span><br>        <span class="hljs-keyword">try</span> &#123;<br>            <span class="hljs-type">String</span> <span class="hljs-variable">s</span> <span class="hljs-operator">=</span> futureTask.get(<span class="hljs-number">10</span>, TimeUnit.SECONDS);<br>            System.out.println(<span class="hljs-string">&quot;获取了异步结果：&quot;</span>+s);<br>        &#125; <span class="hljs-keyword">catch</span> (InterruptedException e) &#123;<br>            e.printStackTrace();<br>        &#125; <span class="hljs-keyword">catch</span> (ExecutionException e) &#123;<br>            e.printStackTrace();<br>        &#125; <span class="hljs-keyword">catch</span> (TimeoutException e) &#123;<br>            System.out.println(<span class="hljs-string">&quot;执行超时了&quot;</span>);<br>            e.printStackTrace();<br>        &#125;<br>    &#125;<br>    <br>&#125;<br><br><br></code></pre></td></tr></table></figure>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>FutureTask</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>mysql表连接索引失效的问题</title>
+    <link href="/2021/02/12/msql%E8%BF%9E%E6%8E%A5%E6%9F%A5%E8%AF%A2%E7%B4%A2%E5%BC%95%E5%A4%B1%E6%95%88/"/>
+    <url>/2021/02/12/msql%E8%BF%9E%E6%8E%A5%E6%9F%A5%E8%AF%A2%E7%B4%A2%E5%BC%95%E5%A4%B1%E6%95%88/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-使用场景"><a href="#1-使用场景" class="headerlink" title="1.使用场景"></a>1.使用场景</h3><p>  生产上两个表管理，一个表一百多条数据，一个表300W数据，两个表关联字段都加上了索引，结果查询时间需要1分钟。使用explain分析之后发现两个表都是全表扫描。</p><p> sql类似为：</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">SELECT</span> A.ID,A.NAME,B.NAME <span class="hljs-keyword">FROM</span> AX A <span class="hljs-keyword">JOIN</span> BX B <span class="hljs-keyword">ON</span> A.SX_ID <span class="hljs-operator">=</span> B.SX_ID  <span class="hljs-keyword">WHERE</span> A.STATUS <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;1&#x27;</span> <span class="hljs-keyword">AND</span> B.TYPE <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;2&#x27;</span>;<br></code></pre></td></tr></table></figure><h3 id="2-解决办法"><a href="#2-解决办法" class="headerlink" title="2.解决办法"></a>2.解决办法</h3><p> 将A表创建一个聚合索引为 （STATUS ,SX_ID）,B 表创建一个聚合索引  （TYPE ，SX_ID ）</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>索引</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>mysql利用explain优化SQL</title>
+    <link href="/2021/02/12/mysql%E5%88%A9%E7%94%A8explain%E4%BC%98%E5%8C%96SQL/"/>
+    <url>/2021/02/12/mysql%E5%88%A9%E7%94%A8explain%E4%BC%98%E5%8C%96SQL/</url>
+    
+    <content type="html"><![CDATA[<h4 id="1-介绍"><a href="#1-介绍" class="headerlink" title="1.介绍"></a>1.介绍</h4><ul><li>最近在优化慢SQL，通过explain查看执行计划，做一下笔记。 </li><li>Explain命令主要应用在解决数据库性能上，大部分的性能问题可以通过此命令来简单的解决，方便查看SQL语句的执行效果，帮助选择更好的索引和优化查询语句。</li></ul><p>2.用法</p><p>在需要执行的SQL最前面加上EXPLAIN的关键字类似：</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs sql">EXPLAIN <span class="hljs-keyword">SELECT</span> NAME <span class="hljs-keyword">FROM</span> STUDENT <span class="hljs-keyword">WHERE</span> AGE <span class="hljs-operator">=</span> <span class="hljs-number">12</span><br></code></pre></td></tr></table></figure><p>3.分析</p><p>经常需要关注的信息：</p><p> <strong>select_type</strong> : 查询语句得类型  比如  simple  简单查询  union 连接查询  primary : 包含union或者子查询，最外层的部分标记为primary </p><p> <strong>table</strong> ：显示所查询的表名，也可能时表别名。</p><p> <strong>possible_keys:</strong> : 显示能够使用的索引 </p><p> <strong>type</strong>（重点） : 访问类型</p><p>​                 system : 这是const连接类型的一种特例，表只有一行数据</p><p>​                 const : 主键索引仅有一行满足条件</p><p>​                 eq_ref : 被驱动表和驱动表通过驱动表的主键关联。</p><p>​                 ref : 辅助索引访问，等值匹配或者常量匹配。</p><p>​                 ref_or_null : 索引访问，等值匹配或者常量匹配，存在null值。</p><p>​                 index_merge : 合并索引，有多个索引可以选择。</p><p>​                  unique_subquery : 子查询使用唯一索引</p><p>​                 index_subquery : 子查询使用索引</p><p>​                 range : 范围扫描，一个有限制的索引扫描。key列显示使用了哪个索引。当使用&#x3D;、&lt;&gt;、&gt;、&gt;&#x3D;、&lt;、&lt;&#x3D;、IS NULL、&lt;&#x3D;&gt;、BETWEEN 和IN 操作符,用常量比较关键字列时。</p><p>​               index : 和全表扫描一样。只是扫描表的时候按照索引次序进行而不是行。主要优点就是避免了排序, 但是开销仍然非常大。</p><p>​               ALL : 全表扫描</p><p>效率由上往下，全表扫描效率最差。常见得就是const 主键查询，range范围查询，index,all</p><p><strong>key:</strong> 使用的索引</p><p><strong>key_len:</strong> 使用的索引长度   </p><p><strong>rows</strong> (重点):rows表示估算的要扫描的行数，一般Mysql会根据统计表信息和索引的选用情况，估算出 查找记录所要扫描的行数，注意这个并不是实际结果集的行数。</p><p><strong>extra</strong> (重点): 该字段显示的是sql查询的额外信息 ,具体情况具体分析。</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>sql调优</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>线程池使用</title>
+    <link href="/2021/02/08/%E7%BA%BF%E7%A8%8B%E6%B1%A0/"/>
+    <url>/2021/02/08/%E7%BA%BF%E7%A8%8B%E6%B1%A0/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-线程池的优势"><a href="#1-线程池的优势" class="headerlink" title="1.线程池的优势"></a>1.线程池的优势</h3><ol><li>降低系统资源消耗，通过重用已存在的线程，降低线程创建和销毁造成的消耗；</li><li>提高系统响应速度，当有任务到达时，通过复用已存在的线程，无需等待新线程的创建便能立即执行；</li><li>方便线程并发数的管控。因为线程若是无限制的创建，可能会导致内存占用过多而产生OOM，并且会造成cpu过度切换（cpu切换线程是有时间成本的（需要保持当前执行线程的现场，并恢复要执行线程的现场）））。</li><li>提供更强大的功能，延时定时线程池。</li></ol><h3 id="2-线程池的主要参数"><a href="#2-线程池的主要参数" class="headerlink" title="2.线程池的主要参数"></a>2.线程池的主要参数</h3><p>1.corePoolSize（核心线程数）：线程池的基本大小，核心线程会一直存活，即使没有任务提交，当线程数小于核心线程数时，即使有线程空闲，线程池也会优先创建新线程处理。</p><p>2、maximumPoolSize（线程池最大大小）：线程池所允许的最大线程个数。当队列满了，且已创建的线程数小于maximumPoolSize，则线程池会创建新的线程来执行任务。另外，对于无界队列，可忽略该参数。</p><p>3、keepAliveTime（线程存活保持时间）当线程池中线程数大于核心线程数时，线程的空闲时间如果超过线程存活时间，那么这个线程就会被销毁，直到线程池中的线程数小于等于核心线程数。</p><p>4、workQueue（任务队列）：用于传输和保存等待执行任务的阻塞队列。</p><p>5、handler（线程饱和策略）：当线程池和队列都满了，再加入线程会执行此策略。</p><h3 id="3-线程池执行流程"><a href="#3-线程池执行流程" class="headerlink" title="3.线程池执行流程"></a>3.线程池执行流程</h3><p><img src="http://melolh.gitee.io/blog/img/text/threadPool/demo.png" alt="avatar"></p><p>1.向线程池提交一个任务，判断线程池中当前存活线程是否小于核心线程数，如果小于，线程池会创建一个核心线程池去执行任务。如果大于等于核心线程数，判断等待队列是否已满，如果不满则放入等待队列，等待执行，如果等待队列满了，且小于最大线程数，则创建一个非核心线程执行，如果大于最大线程数，则执行拒绝策略。</p><p>四种拒绝策略</p><p>AbortPolicy(抛出一个异常，默认的)</p><p>DiscardPolicy(直接丢弃任务)</p><p>DiscardOldestPolicy（丢弃队列里最老的任务，将当前这个任务继续提交给线程池）</p><p>CallerRunsPolicy（交给线程池调用所在的线程进行处理)</p><h3 id="4-线程池参数设置"><a href="#4-线程池参数设置" class="headerlink" title="4.线程池参数设置"></a>4.线程池参数设置</h3><p>1.核心线程数</p><ul><li>CPU密集型：CPU的核数+1     例如  8核CPU核心线程数为9</li><li>IO密集型 ： CPU核数*2   例如  8核CPU核心线程数为16</li></ul><p>2.最大线程数：一般为核心线程数*2</p><h3 id="5-代码示例"><a href="#5-代码示例" class="headerlink" title="5.代码示例"></a>5.代码示例</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">ThreadPoolTest</span> &#123; <br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">CORE_SIZE</span> <span class="hljs-operator">=</span><span class="hljs-number">16</span>;  <br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">MAX_SIZE</span> <span class="hljs-operator">=</span><span class="hljs-number">32</span>;   <br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">WORE_QUEUE</span> <span class="hljs-operator">=</span><span class="hljs-number">10</span>;   <br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">long</span> <span class="hljs-variable">KEEP_ALIVE</span> <span class="hljs-operator">=</span><span class="hljs-number">60</span>;       <br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;        <br>        <span class="hljs-comment">// 使用构造线程池 推荐使用        </span><br>    <span class="hljs-type">ThreadPoolExecutor</span> <span class="hljs-variable">threadPoolExecutor</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">ThreadPoolExecutor</span>(                        CORE_SIZE, MAX_SIZE, KEEP_ALIVE, TimeUnit.SECONDS, <span class="hljs-keyword">new</span> <span class="hljs-title class_">ArrayBlockingQueue</span>&lt;Runnable&gt;(WORE_QUEUE));  <br>    <span class="hljs-comment">//创建一个线程池，如果线程池中的线程数量过大，它可以有效的回收多余的线程，如果线程数不足，那么它可以创建新的线程。    </span><br> <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService</span> <span class="hljs-operator">=</span> Executors.newCachedThreadPool();              <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService1</span> <span class="hljs-operator">=</span> Executors.newFixedThreadPool(<span class="hljs-number">4</span>);        <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService2</span> <span class="hljs-operator">=</span> Executors.newSingleThreadExecutor();        <span class="hljs-type">ScheduledExecutorService</span> <span class="hljs-variable">scheduledExecutorService</span> <span class="hljs-operator">=</span> Executors.newScheduledThreadPool(<span class="hljs-number">5</span>);    &#125;&#125;<br><br>        <span class="hljs-comment">// 线程池提交运行线程方式一  无返回值</span><br>        threadPoolExecutor.execute(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br><br>            &#125;<br>        &#125;);<br>        <br>        <span class="hljs-comment">// 有返回值提交</span><br>        threadPoolExecutor.submit(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                <br>            &#125;<br>        &#125;);<br><br></code></pre></td></tr></table></figure><p>项目中的线程池工具类示例</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.concurrent.ArrayBlockingQueue;<br><span class="hljs-keyword">import</span> java.util.concurrent.ThreadPoolExecutor;<br><span class="hljs-keyword">import</span> java.util.concurrent.TimeUnit;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">ThreadPoolExecutorUtil</span> &#123;<br><br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">volatile</span> <span class="hljs-keyword">static</span> ThreadPoolExecutor threadPoolExecutor;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">CORE_SIZE</span> <span class="hljs-operator">=</span><span class="hljs-number">16</span>;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">MAX_SIZE</span> <span class="hljs-operator">=</span><span class="hljs-number">32</span>;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">WORE_QUEUE</span> <span class="hljs-operator">=</span><span class="hljs-number">10</span>;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">final</span> <span class="hljs-keyword">static</span> <span class="hljs-type">long</span> <span class="hljs-variable">KEEP_ALIVE</span> <span class="hljs-operator">=</span><span class="hljs-number">60</span>;<br><br>    <span class="hljs-comment">// 采用双重校验锁懒汉创建单例 一般会通过google得包设置线程池的名称</span><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> ThreadPoolExecutor <span class="hljs-title function_">getThreadPoolExecutor</span><span class="hljs-params">()</span> &#123;<br><br>        <span class="hljs-keyword">if</span> (threadPoolExecutor == <span class="hljs-literal">null</span>) &#123;<br>            <span class="hljs-keyword">synchronized</span> (ThreadPoolExecutorUtil.class) &#123;<br>                <span class="hljs-keyword">if</span> (<span class="hljs-literal">null</span> == threadPoolExecutor) &#123;<br>                    threadPoolExecutor = <span class="hljs-keyword">new</span> <span class="hljs-title class_">ThreadPoolExecutor</span>(<br>                            CORE_SIZE, MAX_SIZE, KEEP_ALIVE, TimeUnit.SECONDS, <span class="hljs-keyword">new</span> <span class="hljs-title class_">ArrayBlockingQueue</span>&lt;Runnable&gt;(WORE_QUEUE));<br>                &#125;<br>            &#125;<br>        &#125;<br>        <span class="hljs-keyword">return</span> threadPoolExecutor;<br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>线程池</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>CountDownLatch的使用</title>
+    <link href="/2021/01/10/cutdownlatch/"/>
+    <url>/2021/01/10/cutdownlatch/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><ul><li>CountDownLatch这个类是JUC包下的一个线程辅助类，可以使一个线程等待其他线程各自执行完毕后再执行。</li><li>是通过一个计数器来实现的，计数器的初始值是线程的数量。每当一个线程执行完毕后，计数器的值就-1，当计数器的值为0时，表示所有线程都执行完毕，然后在闭锁上等待的线程就可以恢复工作了。</li></ul><h3 id="2-应用场景"><a href="#2-应用场景" class="headerlink" title="2.应用场景"></a>2.应用场景</h3><p>多个线程一起执行，其中一个线程等待其他线程执行后再执行，类似：开启6个线程爬取数据，爬取完毕后，显示统计的爬取信息。</p><h3 id="3-介绍API"><a href="#3-介绍API" class="headerlink" title="3.介绍API"></a>3.介绍API</h3><p>​1.构造方法</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-comment">//参数count为计数值</span><br><span class="hljs-keyword">public</span> <span class="hljs-title function_">CountDownLatch</span><span class="hljs-params">(<span class="hljs-type">int</span> count)</span> &#123;  &#125;;  <br></code></pre></td></tr></table></figure><p>​    2.常用API</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-comment">//调用await()方法的线程会被挂起，它会等待直到count值为0才继续执行</span><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">await</span><span class="hljs-params">()</span> <span class="hljs-keyword">throws</span> InterruptedException &#123; &#125;;   <br><span class="hljs-comment">//和await()类似，只不过等待一定的时间后count值还没变为0的话就会继续执行</span><br><span class="hljs-keyword">public</span> <span class="hljs-type">boolean</span> <span class="hljs-title function_">await</span><span class="hljs-params">(<span class="hljs-type">long</span> timeout, TimeUnit unit)</span> <span class="hljs-keyword">throws</span> InterruptedException &#123; &#125;;  <br><span class="hljs-comment">//将count值减1</span><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">countDown</span><span class="hljs-params">()</span> &#123; &#125;;  <br></code></pre></td></tr></table></figure><h3 id="4-代码示例"><a href="#4-代码示例" class="headerlink" title="4.代码示例"></a>4.代码示例</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.concurrent.CountDownLatch;<br><span class="hljs-keyword">import</span> java.util.concurrent.ExecutorService;<br><span class="hljs-keyword">import</span> java.util.concurrent.Executors;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">CountDownLatchTest</span> &#123;<br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService</span> <span class="hljs-operator">=</span> Executors.newFixedThreadPool(<span class="hljs-number">2</span>);<br>        <span class="hljs-type">CountDownLatch</span> <span class="hljs-variable">countDownLatch</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">CountDownLatch</span>(<span class="hljs-number">2</span>);<br><br>            executorService.submit(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>                <span class="hljs-meta">@Override</span><br>                <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                    <span class="hljs-comment">// 执行业务逻辑</span><br>                    <span class="hljs-keyword">try</span> &#123;<br>                        Thread.sleep(<span class="hljs-number">2000</span>);<br>                        System.out.println(<span class="hljs-string">&quot;线程一&quot;</span>+Thread.currentThread()+<span class="hljs-string">&quot;执行了&quot;</span>);<br>                    &#125; <span class="hljs-keyword">catch</span> (InterruptedException e) &#123;<br>                        e.printStackTrace();<br>                    &#125;<br>                    <span class="hljs-comment">// 计数 -1</span><br>                    countDownLatch.countDown();<br>                &#125;<br>            &#125;);<br>        executorService.submit(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>            <span class="hljs-meta">@Override</span><br>            <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                <span class="hljs-comment">// 执行业务逻辑</span><br>                <span class="hljs-keyword">try</span> &#123;<br>                    Thread.sleep(<span class="hljs-number">2000</span>);<br>                    System.out.println(<span class="hljs-string">&quot;线程二&quot;</span>+Thread.currentThread()+<span class="hljs-string">&quot;执行了&quot;</span>);<br>                &#125; <span class="hljs-keyword">catch</span> (InterruptedException e) &#123;<br>                    e.printStackTrace();<br>                &#125;<br>                <span class="hljs-comment">// 计数 -1</span><br>                countDownLatch.countDown();<br>            &#125;<br>        &#125;);<br>        <span class="hljs-keyword">try</span> &#123;<br>            <span class="hljs-comment">// 等待两个线程都执行完毕  即  计数器归位0</span><br>            countDownLatch.await();<br>            System.out.println(<span class="hljs-string">&quot;主线程执行了&quot;</span>);<br>        &#125; <span class="hljs-keyword">catch</span> (InterruptedException e) &#123;<br>            e.printStackTrace();<br>        &#125;<br><br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>JUC</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>ReentrantLock的理解</title>
+    <link href="/2021/01/03/ReentrantLock%E7%9A%84%E7%90%86%E8%A7%A3/"/>
+    <url>/2021/01/03/ReentrantLock%E7%9A%84%E7%90%86%E8%A7%A3/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p>Lock锁是用来控制多个线程访问共享资源的方式，一般来说，一个锁能够防止多个线程同时访问共享资源 。Lock锁提供了与Synchronized关键字类似的同步功能，只是在使用时需要显式地获取和释放锁。  虽然它缺少了（通过synchronized块或者方法所提供的）隐式获取释放锁的便捷性，但是却拥有了锁获取与释放的可操作性、可中断的获取锁以及超时获取锁等多种synchronized关键字所不具备的同步特性。 </p><h3 id="2-常用API介绍"><a href="#2-常用API介绍" class="headerlink" title="2.常用API介绍"></a>2.常用API介绍</h3><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.concurrent.TimeUnit;<br><span class="hljs-keyword">import</span> java.util.concurrent.locks.Lock;<br><span class="hljs-keyword">import</span> java.util.concurrent.locks.ReentrantLock;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">LockTest</span> &#123;<br>    <span class="hljs-comment">// true就是公平锁</span><br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-type">Lock</span> <span class="hljs-variable">lock</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">ReentrantLock</span>(<span class="hljs-literal">true</span>);<br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        <span class="hljs-comment">// 3种获取锁的方法  lock() ， tryLock（） </span><br>        <span class="hljs-comment">// lockInterruptibly(); 表示如果当前线程未被中断则获得锁,如果当前线程被中断则出现异常 使用方法和lock一样</span><br>        lock.lock();<br>        <span class="hljs-keyword">try</span> &#123;<br>            <span class="hljs-comment">// 获取锁加一个超时时间 一个线程在指定的时间内没有获取锁，那就会返回false</span><br>            <span class="hljs-keyword">if</span>(lock.tryLock(<span class="hljs-number">2</span>, TimeUnit.SECONDS))&#123;<br>                <span class="hljs-comment">// dosomething</span><br>            &#125;<br>        &#125; <span class="hljs-keyword">catch</span> (InterruptedException e) &#123;<br>            e.printStackTrace();<br>        &#125; <span class="hljs-keyword">finally</span> &#123;<br>            lock.unlock();<br>        &#125;<br><br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure><p>ReentrantLock是可重入锁，即可以对一个资源重复加锁（加锁解锁次数必须一样， 否则其他线程无法获得锁。 ）。实例化一个ReentrantLock 可以传递参数实现公平锁和非公平锁，公平锁指定是获取锁的线程等待时间越长越先获取锁，类似FIFO。非公平反之。</p><h3 id="3-代码演示"><a href="#3-代码演示" class="headerlink" title="3.代码演示"></a>3.代码演示</h3><p>演示ReentrantLock模拟买票事件。注意：一定要在finally里面显示释放锁，不然可能会导致死锁事件。</p><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">import</span> java.util.concurrent.ExecutorService;<br><span class="hljs-keyword">import</span> java.util.concurrent.Executors;<br><span class="hljs-keyword">import</span> java.util.concurrent.locks.Lock;<br><span class="hljs-keyword">import</span> java.util.concurrent.locks.ReentrantLock;<br><br><span class="hljs-keyword">public</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">LockTest</span> &#123;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-type">int</span> <span class="hljs-variable">count</span> <span class="hljs-operator">=</span> <span class="hljs-number">1000</span>;<br>    <span class="hljs-keyword">private</span> <span class="hljs-keyword">static</span> <span class="hljs-type">Lock</span> <span class="hljs-variable">lock</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">ReentrantLock</span>();<br><br>    <span class="hljs-keyword">public</span> <span class="hljs-keyword">static</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">main</span><span class="hljs-params">(String[] args)</span> &#123;<br>        <span class="hljs-type">ExecutorService</span> <span class="hljs-variable">executorService</span> <span class="hljs-operator">=</span> Executors.newFixedThreadPool(<span class="hljs-number">5</span>);<br>        <span class="hljs-keyword">for</span> (<span class="hljs-type">int</span> <span class="hljs-variable">i</span> <span class="hljs-operator">=</span> <span class="hljs-number">0</span>; i &lt; <span class="hljs-number">5</span>; i++) &#123;<br>            executorService.execute(<span class="hljs-keyword">new</span> <span class="hljs-title class_">Runnable</span>() &#123;<br>                <span class="hljs-meta">@Override</span><br>                <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">()</span> &#123;<br>                    <span class="hljs-keyword">while</span> (<span class="hljs-literal">true</span>) &#123;<br>                        <span class="hljs-keyword">try</span> &#123;<br>                            lock.lock();<br>                            <span class="hljs-keyword">if</span> (count &gt; <span class="hljs-number">0</span>) &#123;<br>                                System.out.println(Thread.currentThread().getName() + <span class="hljs-string">&quot;现在还有&quot;</span> + count + <span class="hljs-string">&quot;张票&quot;</span>);<br>                                count--;<br>                            &#125;<br>                        &#125; <span class="hljs-keyword">catch</span> (Exception e) &#123;<br>                            e.printStackTrace();<br>                        &#125; <span class="hljs-keyword">finally</span> &#123;<br>                            lock.unlock();<br>                        &#125;<br>                    &#125;<br>                &#125;<br>            &#125;);<br>        &#125;<br><br>    &#125;<br>&#125;<br><br><br><br></code></pre></td></tr></table></figure>]]></content>
+    
+    
+    <categories>
+      
+      <category>多线程</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>ReentrantLock</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>mysql创建删除索引</title>
+    <link href="/2020/11/12/mysql%E5%88%9B%E5%BB%BA%E5%88%A0%E9%99%A4%E7%B4%A2%E5%BC%95/"/>
+    <url>/2020/11/12/mysql%E5%88%9B%E5%BB%BA%E5%88%A0%E9%99%A4%E7%B4%A2%E5%BC%95/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-概念"><a href="#1-概念" class="headerlink" title="1.概念"></a>1.概念</h3><p>  索引的目的在于提高查询效率，可以类比字典 。 在创建索引时，需要考虑哪些列会用于 SQL 查询，然后为这些列创建一个或多个索引。事实上，索引也是一种表，保存着主键或索引字段 </p><p>2.索引的创建和删除</p><p>索引类型：</p><ul><li>UNIQUE(唯一索引)：不可以出现相同的值，可以有NULL值</li><li>INDEX(普通索引)：允许出现相同的索引内容</li><li>PROMARY KEY(主键索引)：不允许出现相同的值</li><li>fulltext index(全文索引)：可以针对值中的某个单词，但效率确实不敢恭维</li><li>组合索引：实质上是将多个字段建到一个索引里，列值的组合必须唯一</li></ul><h3 id="2-SQL"><a href="#2-SQL" class="headerlink" title="2.SQL"></a>2.SQL</h3><ul><li>创建索引</li></ul><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><code class="hljs SQL"><span class="hljs-comment">-- 创建普通索引</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> TABLE_NAME <span class="hljs-keyword">ADD</span> INDEX INDEX_NAME (`column_list`)<br><span class="hljs-comment">-- 创建唯一索引</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> TABLE_NAME <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">UNIQUE</span> INDEX_NAME (`column_list`)<br><span class="hljs-comment">-- 创建普通索引</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> TABLE_NAME <span class="hljs-keyword">ADD</span> <span class="hljs-keyword">PRIMARY</span> KEY(`column_list`)<br><br><span class="hljs-comment">--或者这种方式</span><br><span class="hljs-keyword">CREATE</span>  [<span class="hljs-keyword">UNIQUE</span> <span class="hljs-operator">|</span> FULLTEXT <span class="hljs-operator">|</span> SPATIAL]  INDEX  索引名 <span class="hljs-keyword">ON</span>  表名(字段名) [<span class="hljs-keyword">USING</span> 索引方法]；<br><br></code></pre></td></tr></table></figure><ul><li>删除索引</li></ul><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><code class="hljs SQL"><span class="hljs-keyword">DROP</span> INDEX INDEX_NAME <span class="hljs-keyword">ON</span> TABLE_NAME<br><span class="hljs-comment">-- 或</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> TABLE_NAME <span class="hljs-keyword">DROP</span> INDEX INDEX_NAME<br></code></pre></td></tr></table></figure><h3 id="3-创建索引注意事项"><a href="#3-创建索引注意事项" class="headerlink" title="3.创建索引注意事项"></a>3.创建索引注意事项</h3><p>1.最左匹配原则：mysql会一直向右匹配直到遇到范围查询（例如  &gt; 、&lt;、between、like）就停止匹配。类似</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><code class="hljs SQL"><span class="hljs-comment">-- 查询语句1</span><br><span class="hljs-keyword">SELECT</span> NAME  <span class="hljs-keyword">FROM</span> STUDENT <span class="hljs-keyword">WHERE</span> NAME <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;ZHANGSAN&#x27;</span> <span class="hljs-keyword">AND</span> AGE <span class="hljs-operator">&gt;</span><span class="hljs-number">3</span>  <span class="hljs-keyword">AND</span> SEX <span class="hljs-operator">=</span> <span class="hljs-number">1</span><br><br><span class="hljs-comment">-- 创建索引1</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> STUDENT <span class="hljs-keyword">ADD</span> INDEX INDEX_ONE(`AGE`,`NAME`,`SEX`)<br><br><span class="hljs-comment">-- 创建索引2</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> STUDENT <span class="hljs-keyword">ADD</span> INDEX INDEX_ONE(`NAME`,`AGE`,`SEX`)<br>  <br></code></pre></td></tr></table></figure><p>查询语句1：</p><p>使用索引1查询时 全部使用不到索引；</p><p>使用索引2查询时，NAME和AGE使用索引，SEX使用不到索引；</p><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-comment">-- 查询语句2</span><br><span class="hljs-keyword">SELECT</span> NAME  <span class="hljs-keyword">FROM</span> STUDENT <span class="hljs-keyword">WHERE</span> NAME <span class="hljs-operator">=</span> <span class="hljs-string">&#x27;ZHANGSAN&#x27;</span> <span class="hljs-keyword">AND</span> AGE <span class="hljs-operator">=</span><span class="hljs-number">3</span>  <span class="hljs-keyword">AND</span> SEX <span class="hljs-operator">=</span> <span class="hljs-number">1</span><br><br><span class="hljs-comment">-- 创建索引1</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> STUDENT <span class="hljs-keyword">ADD</span> INDEX INDEX_ONE(`AGE`,`NAME`,`SEX`)<br><span class="hljs-comment">-- 创建索引2</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> STUDENT <span class="hljs-keyword">ADD</span> INDEX INDEX_ONE(`NAME`,`AGE`,`SEX`)<br><span class="hljs-comment">-- 创建索引2</span><br><span class="hljs-keyword">ALTER</span> <span class="hljs-keyword">TABLE</span> STUDENT <span class="hljs-keyword">ADD</span> INDEX INDEX_ONE(`NAME`,`SEX`,`AGE`)<br></code></pre></td></tr></table></figure><p>查询语句2：</p><p>使用索引1查询时 全部使用不到索引；</p><p>使用索引2查询时，正确使用索引；</p><p>使用索引3查询时，NAME使用索引，AGE和SEX使用不到索引；</p><p><strong>当模糊查询时：like  %NAME% 不使用索引    like   NAME % 使用索引</strong></p><p>2.尽量选择区分度高的列作为索引 ，对于一些类似 SEX  STATUS 只有几个固定值的不建议加索引。</p><p>3.索引列不要参与计算，会导致索引失效，全表扫描。</p><p>4.尽量的扩展索引，不要新建索引。比如表中已经有a的索引，现在要加(a,b)的索引，那么只需要修改原来的索引即可。 </p><h3 id="4-联合索引的优势"><a href="#4-联合索引的优势" class="headerlink" title="4.联合索引的优势"></a>4.联合索引的优势</h3><p>1.”一个顶三个”。建了一个(a,b,c)的复合索引，那么实际等于建了(a),(a,b),(a,b,c)三个索引，因为每多一个索引，都会增加写操作的开销和磁盘空间的开销。对于大量数据的表，这可是不小的开销！</p><p>2.覆盖索引。同样的有复合索引（a,b,c），如果有如下的sql: select a,b,c from table where a&#x3D;1 and b &#x3D; 1。那么MySQL可以直接通过遍历索引取得数据，而无需回表，这减少了很多的随机io操作。减少io操作，特别的随机io其实是dba主要的优化策略。所以，在真正的实际应用中，覆盖索引是主要的提升性能的优化手段之一</p><p>3.索引列越多，通过索引筛选出的数据越少。有1000W条数据的表，有如下sql:select * from table where a &#x3D; 1 and b &#x3D;2 and c &#x3D; 3,假设假设每个条件可以筛选出10%的数据，如果只有单值索引，那么通过该索引能筛选出1000W*10%&#x3D;100w 条数据，然后再回表从100w条数据中找到符合b&#x3D;2 and c&#x3D; 3的数据，然后再排序，再分页；如果是复合索引，通过索引筛选出1000w *10% *10% *10%&#x3D;1w，然后再排序、分页，哪个更高效，一眼便知</p>]]></content>
+    
+    
+    <categories>
+      
+      <category>数据库</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>索引</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>spring-starter自动装配原理</title>
+    <link href="/2020/06/12/spring-starter%E8%87%AA%E5%8A%A8%E8%A3%85%E9%85%8D%E5%8E%9F%E7%90%86/"/>
+    <url>/2020/06/12/spring-starter%E8%87%AA%E5%8A%A8%E8%A3%85%E9%85%8D%E5%8E%9F%E7%90%86/</url>
+    
+    <content type="html"><![CDATA[<h2 id="简介"><a href="#简介" class="headerlink" title="简介"></a>简介</h2><p> 众所周知spring通过一些默认配置帮我们简化了一些配置，集成了许多优秀的框架，接下来探究其中的原理。</p><h2 id="自动配置"><a href="#自动配置" class="headerlink" title="自动配置"></a>自动配置</h2><p>（1）首先我们看一下springboot的启动类注解@SpringBootApplication，他是如何去集成外部配置和默认配置的。<br><img src="https://img-blog.csdnimg.cn/20200701093709492.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>接下来咱们重点看@SpringBootConfiguration和@EnableAutoConfiguration注解<br>（2）@SpringBootConfiguration继承自@Configuration，二者功能也一致，标注当前类是配置类，<br>并会将当前类内声明的一个或多个以@Bean注解标记的方法的实例纳入到spring容器中，并且实例名就是方法名。<br>（3）那么问题来，到底是扫描哪些包把什么地方的配置，外部的框架类似于mybatis又是怎么约定的，关键就在于@EnableAutoConfiguration，下面咱们来看看这个注解干了哪些事情。<br><img src="https://img-blog.csdnimg.cn/20200701095226866.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>AutoConfigurationImportSelector，@EnableAutoConfiguration可以帮助SpringBoot应用将所有符合条件的@Configuration配置都加载到当前SpringBoot创建并使用的IoC容器。<br><img src="https://img-blog.csdnimg.cn/20200701095343242.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>在AutoConfigurationImportSelector类中可以看到通过 SpringFactoriesLoader.loadFactoryNames()<br>把 spring-boot-autoconfigure.jar&#x2F;META-INF&#x2F;spring.factories中每一个xxxAutoConfiguration文件都加载到容器中。<br><img src="https://img-blog.csdnimg.cn/20200701095353992.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p><h2 id="demo演示"><a href="#demo演示" class="headerlink" title="demo演示"></a>demo演示</h2><p>（1）首先新建一个空的maven工程，创建两个子工程，其中start-consumer是演示使用start，是一个web工程，start-product是一个普通的工程，用于start提供。我们知道一个普通的工程是不能直接把对象注入到spring的，但是start-consumer是一个web工程，引入start-product的jar,当start-consumer启动时会检测到META-INF&#x2F;spring.factories文件，发现该文件中配置ProductAutoConfigure的类路径，而且ProductAutoConfigure被@Configuration标注了加入了spring,同时还有个被 @Bean标注的方法helloService也同时被spring管理，所以start-consumer就可以依赖注入这个bean。<br><img src="https://img-blog.csdnimg.cn/20200701111423395.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200701111436347.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200701111447566.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200701111459259.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200701111535636.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200701111605983.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>]]></content>
+    
+    
+    <categories>
+      
+      <category>springboot</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>starter</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>基于hexo和gitee搭建个人博客</title>
+    <link href="/2020/05/12/%E5%9F%BA%E4%BA%8Ehexo%E5%92%8Cgithub%E6%90%AD%E5%BB%BA%E4%B8%AA%E4%BA%BA%E5%8D%9A%E5%AE%A2/"/>
+    <url>/2020/05/12/%E5%9F%BA%E4%BA%8Ehexo%E5%92%8Cgithub%E6%90%AD%E5%BB%BA%E4%B8%AA%E4%BA%BA%E5%8D%9A%E5%AE%A2/</url>
+    
+    <content type="html"><![CDATA[<h3 id="1-环境"><a href="#1-环境" class="headerlink" title="1.环境"></a>1.环境</h3><pre><code class="hljs">   （1）安装nodejs（自行百度） nodejs  v10.20.1   （2）安装npm（自行百度）     npm     v10.20.1   （3）安装git（自行百度）    （4）注册gitee账号（自行百度）     （5）npm的源换一下 ，下载速度加快。cmd窗口运行命令 npm config set registry https://registry.npm.taobao.org   （6）安装hexo      cmd窗口运行命令  npm install -g hexo-cli</code></pre><h3 id="2-配置hexo"><a href="#2-配置hexo" class="headerlink" title="2.配置hexo"></a>2.配置hexo</h3><p>1.指定一个空的文件夹，路径栏输入cmd命令，打开cmd窗口，然后运行命令  hexo init ，如下表示成功，然后你会看到文件夹多了一些文件。<br>     <img src="https://img-blog.csdnimg.cn/20200629165638140.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200629160305271.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200629160901895.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述">                                    2.安装hexo-git工具推送代码，在此文件夹内打开cmd 窗口 ，运行命令 npm install hexo-deployer-git –save<br><img src="https://img-blog.csdnimg.cn/2020062916331481.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>3.在此文件夹内打开cmd 窗口 ，运行命令 hexo  clean  ， 该命令是清除命令，接着运行命令 hexo g  ，该命令生成配置文件 ，运行命令  hexo s  该命令运行项目，然后可以看到本地博客网址，将地址 localhost:4000  输入在浏览器中就可以看到初始博客页面，至此初步成功，接下来需要部署到gitee，让别人都可以看到你的博客。<br><img src="https://img-blog.csdnimg.cn/20200629161434680.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200629161504444.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/202006291617215.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><br>4.登录gitee创建一个新的公开的项目 </p><p><img src="https://melolh.gitee.io/blog/img/text/gitee/1617698892(1).jpg" alt="在这里插入图片描述"></p><p>5.你的项目-》服务-》gitee pages -》新建一个giteepages</p><p><img src="https://melolh.gitee.io/blog/img/text/gitee/1617698984(1).jpg" alt="在这里插入图片描述"></p><p>6.配置_config.yml的gitee地址，然后输入命令 hexo d   此命令将你本地的代码push到github仓库，需要输入gitee用户名和密码。注意每次更新完本地之后需要点击gitee pages里面的更新</p><ol><li><img src="https://img-blog.csdnimg.cn/20200629170455855.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"><img src="https://melolh.gitee.io/blog/img/text/gitee/1617698892(1).jpg" alt="在这里插入图片描述"><br><img src="https://img-blog.csdnimg.cn/20200629164922652.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></li></ol><p>7.个人博客搭建成功，至于模板不同是应为我换了默认主题。增加新的博客在source_posts创建.md文件,使用的是markdown语法。</p><p>8.推荐一个好的主题  <a href="https://hexo.fluid-dev.com/docs/guide/">https://hexo.fluid-dev.com/docs/guide/</a></p>]]></content>
+    
+    
+    <categories>
+      
+      <category>博客搭建</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>hexo</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>动态代理简单实现</title>
+    <link href="/2020/02/10/%E5%8A%A8%E6%80%81%E4%BB%A3%E7%90%86%E7%AE%80%E5%8D%95%E5%AE%9E%E7%8E%B0/"/>
+    <url>/2020/02/10/%E5%8A%A8%E6%80%81%E4%BB%A3%E7%90%86%E7%AE%80%E5%8D%95%E5%AE%9E%E7%8E%B0/</url>
+    
+    <content type="html"><![CDATA[<h2 id="动态代理简单实例"><a href="#动态代理简单实例" class="headerlink" title="动态代理简单实例"></a>动态代理简单实例</h2><h3 id="动态代理可以对目标对象进行增强，但必须得实现一个接口"><a href="#动态代理可以对目标对象进行增强，但必须得实现一个接口" class="headerlink" title="动态代理可以对目标对象进行增强，但必须得实现一个接口"></a>动态代理可以对目标对象进行增强，但必须得实现一个接口</h3><p>（1） 被代理的类</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><code class="hljs python">package entity;<br><br>public <span class="hljs-keyword">class</span> <span class="hljs-title class_">Person</span> implements Strong&#123;<br><br><span class="hljs-meta">    @Override</span><br>    public void howToStrong() &#123;<br>        System.out.println(<span class="hljs-string">&quot;如何才能变强&quot;</span>);<br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure><p>（2） 实现的接口</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><code class="hljs python">package entity;<br><br>public interface Strong &#123;<br>    void howToStrong();<br>&#125;<br><br></code></pre></td></tr></table></figure><p>（3）动态代理实现</p><figure class="highlight plaintext"><figcaption><span>entity;</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><code class="hljs package"><br>import java.lang.reflect.InvocationHandler;<br>import java.lang.reflect.Method;<br>import java.lang.reflect.Proxy;<br><br>public class PersonProxy &#123;<br><br>    public static Object toStrong(Object target)&#123;<br>        // 类加载器<br>        ClassLoader classLoader = target.getClass().getClassLoader();<br>        // 被代理对象实现的接口<br>        Class&lt;?&gt;[] interfaces = target.getClass().getInterfaces();<br>        // new InvocationHandler() 执行的方法<br>        Object o = Proxy.newProxyInstance(classLoader, interfaces, new InvocationHandler() &#123;<br>            /**<br>             *<br>             * @param proxy 调用这个方法的代理实例<br>             * @param method 需要调用的方法<br>             * @param args 方法调用时所需要的参数<br>             * @return java.lang.Object<br>             * @author melo、lh<br>             * @createTime 2020-04-03 17:09:09<br>             */<br>            @Override<br>            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable &#123;<br>                System.out.println(&quot;996&quot;);<br>                Object invoke = method.invoke(target, args);<br>                System.out.println(&quot;变秃&quot;);<br>                return invoke;<br>            &#125;<br>        &#125;);<br>        return o;<br>    &#125;<br>&#125;<br></code></pre></td></tr></table></figure><p>lambda简化</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><code class="hljs python">Object o = Proxy.newProxyInstance(classLoader, interfaces, (proxy, method, args) -&gt;&#123;<br>          System.out.println(<span class="hljs-string">&quot;996&quot;</span>);<br>          Object invoke = method.invoke(target, args);<br>          System.out.println(<span class="hljs-string">&quot;变秃&quot;</span>);<br>          <span class="hljs-keyword">return</span> invoke;<br>      &#125;);<br></code></pre></td></tr></table></figure><p>（4）测试类</p><figure class="highlight python"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><code class="hljs python">package entity;<br><br>public <span class="hljs-keyword">class</span> <span class="hljs-title class_">Test</span> &#123;<br>    public static void main(String[] args) &#123;<br>        Strong strong   = (Strong) PersonProxy.toStrong(new Person());<br>        strong.howToStrong();<br>    &#125;<br>&#125;<br><br></code></pre></td></tr></table></figure><p>结果展示<img src="https://img-blog.csdnimg.cn/20200403172352844.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzQyMjQwMTQ1,size_16,color_FFFFFF,t_70" alt="在这里插入图片描述"></p>]]></content>
+    
+    
+    <categories>
+      
+      <category>设计模式</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>动态代理</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
+    <title>如何将本地代码提交到gitHub</title>
+    <link href="/2020/01/10/%E5%A6%82%E4%BD%95%E5%B0%86%E6%9C%AC%E5%9C%B0%E4%BB%A3%E7%A0%81%E6%8F%90%E4%BA%A4%E5%88%B0gitHub/"/>
+    <url>/2020/01/10/%E5%A6%82%E4%BD%95%E5%B0%86%E6%9C%AC%E5%9C%B0%E4%BB%A3%E7%A0%81%E6%8F%90%E4%BA%A4%E5%88%B0gitHub/</url>
+    
+    <content type="html"><![CDATA[<h2 id="操作步骤"><a href="#操作步骤" class="headerlink" title="操作步骤"></a>操作步骤</h2><ol><li>首先要安装git(没安装请自行百度)。</li><li>进入github,创建公共仓库。</li><li>进入你需要托管的项目文件夹执行右击执行 git bash 命令。 </li><li>在命令行提示符中，输入“git init”，使项目文件夹加入git管理。 </li><li>输入“git add .”（不要漏了“.”），将文件夹内容添加到git。 </li><li>输入“git commit -m “首次提交””（“git commit -m “你的提交信息””） 添加提交注释。</li><li>输入“git remote add origin <a href="https://github.com/xx/xx.git%E2%80%9D%EF%BC%88git">https://github.com/xx/xx.git”（git</a> remote add origin 你自己的https地址），连接你的github仓库。 </li><li>输入“git push -u origin master”，上传项目到Github。如果第一次提交这里会要求输入github的账号密码，按要求输入就可以。 </li><li>完成，查看github仓库代码已经提交完成。</li></ol>]]></content>
+    
+    
+    <categories>
+      
+      <category>代码提交</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>git</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
   
 </search>
