@@ -1,0 +1,735 @@
+
+
+<!DOCTYPE html>
+<html lang="zh-CN" data-default-color-scheme=auto>
+
+
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="76x76" href="/img/fluid.png">
+  <link rel="icon" href="/img/fluid.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, shrink-to-fit=no">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  
+  <meta name="theme-color" content="#2f4154">
+  <meta name="author" content="John Doe">
+  <meta name="keywords" content="">
+  
+    <meta name="description" content="分布式锁1.背景传统的单体应用，高并发多线程对共享资源的访问，可以直接对共享资源上锁，因为锁是所有线程可见的。分布式环境下，传统的同步机制对其它进程是不可见的，所以对共享资源的操作，需要全局的分布式锁来协调控制。分布式锁其实就是，控制分布式系统不同进程共同访问共享资源的一种锁的实现。如果不同的系统或同一个系统的不同主机之间共享了某个临界资源，往往需要互斥来防止彼此干扰，以保证一致性。 业界流行的分">
+<meta property="og:type" content="article">
+<meta property="og:title" content="redis分布式锁">
+<meta property="og:url" content="http://example.com/2022/12/03/%E5%B8%B8%E8%A7%81%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="分布式锁1.背景传统的单体应用，高并发多线程对共享资源的访问，可以直接对共享资源上锁，因为锁是所有线程可见的。分布式环境下，传统的同步机制对其它进程是不可见的，所以对共享资源的操作，需要全局的分布式锁来协调控制。分布式锁其实就是，控制分布式系统不同进程共同访问共享资源的一种锁的实现。如果不同的系统或同一个系统的不同主机之间共享了某个临界资源，往往需要互斥来防止彼此干扰，以保证一致性。 业界流行的分">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="http://example.com/img/bg/1.jpg">
+<meta property="article:published_time" content="2022-12-03T14:00:00.000Z">
+<meta property="article:modified_time" content="2023-01-28T07:26:40.493Z">
+<meta property="article:author" content="John Doe">
+<meta property="article:tag" content="分布式锁">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="http://example.com/img/bg/1.jpg">
+  
+  
+  
+  <title>redis分布式锁 - Hexo</title>
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/twitter-bootstrap/4.6.1/css/bootstrap.min.css" />
+
+
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/github-markdown-css/4.0.0/github-markdown.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/hint.css/2.7.0/hint.min.css" />
+
+  <link  rel="stylesheet" href="https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.css" />
+
+
+
+<!-- 主题依赖的图标库，不要自行修改 -->
+<!-- Do not modify the link that theme dependent icons -->
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1749284_hj8rtnfg7um.css">
+
+
+
+<link rel="stylesheet" href="//at.alicdn.com/t/font_1736178_lbnruvf0jn.css">
+
+
+<link  rel="stylesheet" href="/css/main.css" />
+
+
+  <link id="highlight-css" rel="stylesheet" href="/css/highlight.css" />
+  
+    <link id="highlight-css-dark" rel="stylesheet" href="/css/highlight-dark.css" />
+  
+
+
+
+
+  <script id="fluid-configs">
+    var Fluid = window.Fluid || {};
+    Fluid.ctx = Object.assign({}, Fluid.ctx)
+    var CONFIG = {"hostname":"example.com","root":"/","version":"1.9.4","typing":{"enable":true,"typeSpeed":70,"cursorChar":"_","loop":false,"scope":[]},"anchorjs":{"enable":true,"element":"h1,h2,h3,h4,h5,h6","placement":"left","visible":"hover","icon":""},"progressbar":{"enable":true,"height_px":3,"color":"#29d","options":{"showSpinner":false,"trickleSpeed":100}},"code_language":{"enable":true,"default":"TEXT"},"copy_btn":true,"image_caption":{"enable":true},"image_zoom":{"enable":true,"img_url_replace":["",""]},"toc":{"enable":true,"placement":"right","headingSelector":"h1,h2,h3,h4,h5,h6","collapseDepth":0},"lazyload":{"enable":true,"loading_img":"/img/loading.gif","onlypost":false,"offset_factor":2},"web_analytics":{"enable":false,"follow_dnt":true,"baidu":null,"google":null,"gtag":null,"tencent":{"sid":null,"cid":null},"woyaola":null,"cnzz":null,"leancloud":{"app_id":null,"app_key":null,"server_url":null,"path":"window.location.pathname","ignore_local":false}},"search_path":"/local-search.xml"};
+
+    if (CONFIG.web_analytics.follow_dnt) {
+      var dntVal = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+      Fluid.ctx.dnt = dntVal && (dntVal.startsWith('1') || dntVal.startsWith('yes') || dntVal.startsWith('on'));
+    }
+  </script>
+  <script  src="/js/utils.js" ></script>
+  <script  src="/js/color-schema.js" ></script>
+  
+
+
+  
+<meta name="generator" content="Hexo 6.3.0"></head>
+
+
+<body>
+  
+
+  <header>
+    
+
+<div class="header-inner" style="height: 70vh;">
+  <nav id="navbar" class="navbar fixed-top  navbar-expand-lg navbar-dark scrolling-navbar">
+  <div class="container">
+    <a class="navbar-brand" href="/">
+      <strong>Fluid</strong>
+    </a>
+
+    <button id="navbar-toggler-btn" class="navbar-toggler" type="button" data-toggle="collapse"
+            data-target="#navbarSupportedContent"
+            aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+      <div class="animated-icon"><span></span><span></span><span></span></div>
+    </button>
+
+    <!-- Collapsible content -->
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+      <ul class="navbar-nav ml-auto text-center">
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/">
+                <i class="iconfont icon-home-fill"></i>
+                <span>首页</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/archives/">
+                <i class="iconfont icon-archive-fill"></i>
+                <span>归档</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/categories/">
+                <i class="iconfont icon-category-fill"></i>
+                <span>分类</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/tags/">
+                <i class="iconfont icon-tags-fill"></i>
+                <span>标签</span>
+              </a>
+            </li>
+          
+        
+          
+          
+          
+          
+            <li class="nav-item">
+              <a class="nav-link" href="/about/">
+                <i class="iconfont icon-user-fill"></i>
+                <span>关于</span>
+              </a>
+            </li>
+          
+        
+        
+          <li class="nav-item" id="search-btn">
+            <a class="nav-link" target="_self" href="javascript:;" data-toggle="modal" data-target="#modalSearch" aria-label="Search">
+              <i class="iconfont icon-search"></i>
+            </a>
+          </li>
+          
+        
+        
+          <li class="nav-item" id="color-toggle-btn">
+            <a class="nav-link" target="_self" href="javascript:;" aria-label="Color Toggle">
+              <i class="iconfont icon-dark" id="color-toggle-icon"></i>
+            </a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+</nav>
+
+  
+
+<div id="banner" class="banner" parallax=true
+     style="background: url('/img/default.png') no-repeat center center; background-size: cover;">
+  <div class="full-bg-img">
+    <div class="mask flex-center" style="background-color: rgba(0, 0, 0, 0.3)">
+      <div class="banner-text text-center fade-in-up">
+        <div class="h2">
+          
+            <span id="subtitle" data-typed-text="redis分布式锁"></span>
+          
+        </div>
+
+        
+          
+  <div class="mt-3">
+    
+    
+      <span class="post-meta">
+        <i class="iconfont icon-date-fill" aria-hidden="true"></i>
+        <time datetime="2022-12-03 22:00" pubdate>
+          2022年12月3日 晚上
+        </time>
+      </span>
+    
+  </div>
+
+  <div class="mt-1">
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-chart"></i>
+        
+          5.4k 字
+        
+      </span>
+    
+
+    
+      <span class="post-meta mr-2">
+        <i class="iconfont icon-clock-fill"></i>
+        
+        
+        
+          45 分钟
+        
+      </span>
+    
+
+    
+    
+  </div>
+
+
+        
+      </div>
+
+      
+    </div>
+  </div>
+</div>
+
+</div>
+
+  </header>
+
+  <main>
+    
+      
+
+<div class="container-fluid nopadding-x">
+  <div class="row nomargin-x">
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+
+    </div>
+
+    <div class="col-lg-8 nopadding-x-md">
+      <div class="container nopadding-x-md" id="board-ctn">
+        <div id="board">
+          <article class="post-content mx-auto">
+            <!-- SEO header -->
+            <h1 style="display: none">redis分布式锁</h1>
+            
+            
+              <div class="markdown-body">
+                
+                <h1 id="分布式锁"><a href="#分布式锁" class="headerlink" title="分布式锁"></a>分布式锁</h1><h2 id="1-背景"><a href="#1-背景" class="headerlink" title="1.背景"></a>1.背景</h2><p>传统的单体应用，高并发多线程对共享资源的访问，可以直接对共享资源上锁，因为锁是所有线程可见的。分布式环境下，传统的同步机制对其它进程是不可见的，所以对共享资源的操作，需要全局的分布式锁来协调控制。分布式锁其实就是，控制分布式系统不同进程共同访问共享资源的一种锁的实现。如果不同的系统或同一个系统的不同主机之间共享了某个临界资源，往往需要互斥来防止彼此干扰，以保证一致性。</p>
+<p>业界流行的分布式锁实现，一般有这 3 种方式：</p>
+<ul>
+<li>基于数据库实现的分布式锁</li>
+<li>基于 Redis 实现的分布式锁</li>
+<li>基于 Zookeeper 实现的分布式锁</li>
+</ul>
+<h2 id="2-分布式锁的实现方案"><a href="#2-分布式锁的实现方案" class="headerlink" title="2.分布式锁的实现方案"></a>2.分布式锁的实现方案</h2><p>数据库作为全局公用资源，可以跨越多个应用进程来实现分布式锁，同理其它公共中间件也可以作为分布式锁的实现，如redis和zookeeper。</p>
+<h3 id="1-基于数据库实现"><a href="#1-基于数据库实现" class="headerlink" title="1.基于数据库实现"></a>1.基于数据库实现</h3><h4 id="1-悲观锁"><a href="#1-悲观锁" class="headerlink" title="1.悲观锁"></a>1.悲观锁</h4><p>可以使用<code>select * from table where id = &quot;2&quot; for update </code>来实现分布式锁（注意必须要开启事务）。</p>
+<figure class="highlight fsharp"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><code class="hljs fsharp"><span class="hljs-keyword">public</span> boolean <span class="hljs-built_in">lock</span>（） &#123;<br>   <span class="hljs-comment">//开启事务</span><br>     <span class="hljs-keyword">begin</span>;<br>       <span class="hljs-keyword">try</span> &#123;<br> 　　　　  string result <span class="hljs-operator">=</span> <span class="hljs-string">&quot;select  * from  t_lock where t_method = &quot;</span>payMethod<span class="hljs-string">&quot; for update;</span><br><span class="hljs-string">     　　 if (result == null) &#123;</span><br><span class="hljs-string">        　　　　return true;</span><br><span class="hljs-string">　　　　　  &#125;</span><br><span class="hljs-string">       &#125;</span><br><span class="hljs-string">       catch(Exception e) &#123;</span><br><span class="hljs-string"></span><br><span class="hljs-string">       &#125;</span><br><span class="hljs-string">&#125;</span><br><span class="hljs-string"></span><br><span class="hljs-string">public void unock() &#123;</span><br><span class="hljs-string">//提交事务，释放锁</span><br><span class="hljs-string">  commit();</span><br><span class="hljs-string">&#125;</span><br></code></pre></td></tr></table></figure>
+
+<p>如果where条件字段命中索引，则会加上行级锁，当前事务未提交的情况下当前id&#x3D;”2”的记录无法被修改。</p>
+<p>如果未命中索引则会是表锁，当前表的任何更新记录都需要等待当前事务提交。目前大多数主流的分布式调度框架在就是利用这种思想处理集群部署时,多台调度器如何保证任务不会重复调用的问题，类似xxljob。</p>
+<p>缺点：</p>
+<p>1.我们要使用排他锁来进行分布式锁的lock，那么一个排他锁长时间不提交，就会占用数据库连接。一旦类似的连接变得多了，就可能把数据库连接池撑爆 。</p>
+<p>2.需要判断是表锁还是行锁，表锁会影响吞吐量</p>
+<h4 id="2-乐观锁"><a href="#2-乐观锁" class="headerlink" title="2.乐观锁"></a>2.乐观锁</h4><p>大多数是基于数据版本(version)的记录机制实现的。何谓数据版本号？即为数据增加一个版本标识，在基于数据库表的版本解决方案中，一般是通过为数据库表添加一个 “version”字段来实现读取出数据时，将此版本号一同读出，之后更新时，对此版本号加1。</p>
+<p>在更新过程中，会对版本号进行比较，如果是一致的，没有发生改变，则会成功执行本次操作；如果版本号不一致，则会更新失败。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><code class="hljs sql"><span class="hljs-keyword">select</span> version,stock_num <span class="hljs-keyword">from</span> stock <span class="hljs-keyword">where</span> id <span class="hljs-operator">=</span><span class="hljs-string">&#x27;666&#x27;</span>;<br><br><span class="hljs-keyword">update</span> stock <span class="hljs-keyword">set</span> stock_num<span class="hljs-operator">=</span>stock_num<span class="hljs-number">-2</span>, version<span class="hljs-operator">=</span>oldVersion<span class="hljs-operator">+</span><span class="hljs-number">1</span>, update_time<span class="hljs-operator">=</span>now() <span class="hljs-keyword">where</span> id<span class="hljs-operator">=</span>xx  <span class="hljs-keyword">and</span> version<span class="hljs-operator">=</span>oldVersion<br><br>if(<span class="hljs-keyword">update</span> <span class="hljs-operator">=</span><span class="hljs-number">1</span>)&#123;<br> doSomeThing<br>&#125;<br></code></pre></td></tr></table></figure>
+
+<p>缺点：</p>
+<p>1.每次都需要多一次查询操作来获取当前的version版本，增加数据库开销。</p>
+<p>2.如果更新失败，则需要用户手动触发业务再次获取锁</p>
+<h3 id="2-基于-Zookeeper-实现"><a href="#2-基于-Zookeeper-实现" class="headerlink" title="2.基于 Zookeeper 实现"></a>2.基于 Zookeeper 实现</h3><p>利用zookeeper的顺序临时节点的特性来实现</p>
+<h3 id="3-基于redis实现"><a href="#3-基于redis实现" class="headerlink" title="3.基于redis实现"></a>3.基于redis实现</h3><h4 id="1-使用setNx命令"><a href="#1-使用setNx命令" class="headerlink" title="1.使用setNx命令"></a>1.使用setNx命令</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs java">redisTemplate.opsForValue().setIfAbsent(key, value, time, timeUnit)<br></code></pre></td></tr></table></figure>
+
+<p>描述：使用了redis的set命令，如果Key已存在返回Nil,不存在返回Ok</p>
+<p>优点：操作简单、轻量级、效率高、可以加过期时间</p>
+<p>缺点：无法自动对锁续期、释放锁时需要判断是否是当前线程持有的锁</p>
+<h4 id="2-titans封装的redisLock"><a href="#2-titans封装的redisLock" class="headerlink" title="2.titans封装的redisLock"></a>2.titans封装的redisLock</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-comment">// 加锁 </span><br><span class="hljs-keyword">public</span> <span class="hljs-type">boolean</span> <span class="hljs-title function_">tryLock</span><span class="hljs-params">(<span class="hljs-type">long</span> time, TimeUnit unit)</span> <span class="hljs-keyword">throws</span> InterruptedException &#123;<br>    <span class="hljs-type">long</span> <span class="hljs-variable">timeout</span> <span class="hljs-operator">=</span> unit.toMillis(time);<br><br>    <span class="hljs-keyword">while</span>(timeout &gt;= <span class="hljs-number">0L</span>) &#123;<br>        <span class="hljs-type">long</span> <span class="hljs-variable">expires</span> <span class="hljs-operator">=</span> <span class="hljs-built_in">this</span>.getCurrentTimeFromRedis() + (<span class="hljs-type">long</span>)<span class="hljs-built_in">this</span>.expireMsecs + <span class="hljs-number">1L</span>;<br>        <span class="hljs-type">String</span> <span class="hljs-variable">expiresStr</span> <span class="hljs-operator">=</span> String.valueOf(expires);<br>        <span class="hljs-keyword">if</span> (<span class="hljs-built_in">this</span>.setNX(<span class="hljs-built_in">this</span>.lockKey, expiresStr)) &#123;<br>            <span class="hljs-built_in">this</span>.currentLockValue = expiresStr;<br>            <span class="hljs-built_in">this</span>.locked = <span class="hljs-literal">true</span>;<br>            <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;<br>        &#125;<br><br>        <span class="hljs-keyword">if</span> (<span class="hljs-built_in">this</span>.getLock(expiresStr)) &#123;<br>            <span class="hljs-keyword">return</span> <span class="hljs-literal">true</span>;<br>        &#125;<br><br>        <span class="hljs-type">Random</span> <span class="hljs-variable">random</span> <span class="hljs-operator">=</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Random</span>();<br>        <span class="hljs-type">int</span> <span class="hljs-variable">sleepTime</span> <span class="hljs-operator">=</span> random.nextInt(<span class="hljs-number">100</span>) % <span class="hljs-number">51</span> + <span class="hljs-number">50</span>;<br>        timeout -= (<span class="hljs-type">long</span>)sleepTime;<br>        Thread.sleep((<span class="hljs-type">long</span>)sleepTime);<br>    &#125;<br><br>    <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;<br>&#125;<br><br><span class="hljs-keyword">private</span> <span class="hljs-type">boolean</span> <span class="hljs-title function_">setNX</span><span class="hljs-params">(<span class="hljs-keyword">final</span> String key, <span class="hljs-keyword">final</span> String value)</span> &#123;<br>    <span class="hljs-type">Boolean</span> <span class="hljs-variable">obj</span> <span class="hljs-operator">=</span> <span class="hljs-literal">null</span>;<br><br>    <span class="hljs-keyword">try</span> &#123;<br>        obj = <span class="hljs-built_in">this</span>.redisTemplate.opsForValue().setIfAbsent(key, value);<br>    &#125; <span class="hljs-keyword">catch</span> (Exception var5) &#123;<br>        logger.error(<span class="hljs-string">&quot;setNX redis error, key : &#123;&#125;&quot;</span>, key, var5);<br>    &#125;<br><br>    <span class="hljs-keyword">return</span> obj != <span class="hljs-literal">null</span> ? obj : <span class="hljs-literal">false</span>;<br>&#125;<br><br>   <span class="hljs-comment">//解锁</span><br>   <span class="hljs-keyword">public</span> <span class="hljs-keyword">void</span> <span class="hljs-title function_">unlock</span><span class="hljs-params">()</span> &#123;<br>    <span class="hljs-type">String</span> <span class="hljs-variable">redisLockedValueStr</span> <span class="hljs-operator">=</span> <span class="hljs-built_in">this</span>.get(<span class="hljs-built_in">this</span>.lockKey);<br>    <span class="hljs-keyword">if</span> (<span class="hljs-built_in">this</span>.locked) &#123;<br>        <span class="hljs-built_in">this</span>.locked = <span class="hljs-literal">false</span>;<br>        <span class="hljs-keyword">if</span> (<span class="hljs-built_in">this</span>.currentLockValue.equals(redisLockedValueStr)) &#123;<br>            <span class="hljs-built_in">this</span>.redisTemplate.delete(<span class="hljs-built_in">this</span>.lockKey);<br>        &#125;<br>    &#125;<br><br>&#125;<br><br></code></pre></td></tr></table></figure>
+
+
+<p>描述：使用了redis的setNx命令 set key vale nx  进行加锁，对api进行了包装</p>
+<p>优点：操作简单、轻量级、效率高、释放锁时判断了是不是当前线程持有的锁，不会释放别人的锁</p>
+<p>缺点：无法自动对锁续期，不支持加过期时间</p>
+<h4 id="3-使用redission加锁"><a href="#3-使用redission加锁" class="headerlink" title="3.使用redission加锁"></a>3.使用redission加锁</h4><p><img src="C:\Users\liuhu\AppData\Roaming\Typora\typora-user-images\1668737322097.png" srcset="/img/loading.gif" lazyload alt="1668737322097"></p>
+<p>优点：redisson把获取锁+设置等待时间+设置过期时间、释放锁的各种操作利用lua脚本封装成原子操作，并提供了自动续期的功能，此外还提供了可重入锁的功能。</p>
+<p>缺点：偏重量级</p>
+<p>可重入锁：同一个线程能加锁多次。假如我有个定时调度的批处理，批量处理未支付的订单去进行支付，这个逻辑需要加锁，查询未支付的订单不能有并发。 </p>
+<p>源码解读：加锁：利用lua脚本实现加锁+过期时间原子性，并且实现可重复锁</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><code class="hljs java">&lt;T&gt; RFuture&lt;T&gt; <span class="hljs-title function_">tryLockInnerAsync</span><span class="hljs-params">(<span class="hljs-type">long</span> waitTime, <span class="hljs-type">long</span> leaseTime, TimeUnit unit, <span class="hljs-type">long</span> threadId, RedisStrictCommand&lt;T&gt; command)</span> &#123;<br>    <span class="hljs-keyword">return</span> evalWriteAsync(getRawName(), LongCodec.INSTANCE, command,<br>            <span class="hljs-string">&quot;if (redis.call(&#x27;exists&#x27;, KEYS[1]) == 0) then &quot;</span> +   <span class="hljs-comment">//判断锁是否存在 =0为不存在 没人抢占锁</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;hincrby&#x27;, KEYS[1], ARGV[2], 1); &quot;</span> +  <span class="hljs-comment">//设置hash值，key为锁的name, filed为线程ID，value:1  代表重入一次</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;pexpire&#x27;, KEYS[1], ARGV[1]); &quot;</span> + <span class="hljs-comment">//设置过期时间</span><br>                    <span class="hljs-string">&quot;return nil; &quot;</span> +  <span class="hljs-comment">//返回nil 加锁成功</span><br>                    <span class="hljs-string">&quot;end; &quot;</span> + <span class="hljs-comment">//结束 </span><br>                    <span class="hljs-string">&quot;if (redis.call(&#x27;hexists&#x27;, KEYS[1], ARGV[2]) == 1) then &quot;</span> + <span class="hljs-comment">//进入这里说明有线程抢占了锁，判断是否同一个线程 ==1说明是同一个线程</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;hincrby&#x27;, KEYS[1], ARGV[2], 1); &quot;</span> +  <span class="hljs-comment">//将原来的hash值的value +1，代表重入一次</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;pexpire&#x27;, KEYS[1], ARGV[1]); &quot;</span> + <span class="hljs-comment">//设置新的过期时间</span><br>                    <span class="hljs-string">&quot;return nil; &quot;</span> + <span class="hljs-comment">//返回nil 加锁成功</span><br>                    <span class="hljs-string">&quot;end; &quot;</span> + <span class="hljs-comment">//结束 </span><br>                    <span class="hljs-string">&quot;return redis.call(&#x27;pttl&#x27;, KEYS[1]);&quot;</span>, <span class="hljs-comment">//如果前面两个if 都没走，说明有线程抢占了锁并且不是同一个线程，直接返回这个锁还有多久过期</span><br>            Collections.singletonList(getRawName()), unit.toMillis(leaseTime), getLockName(threadId));<br>&#125;<br></code></pre></td></tr></table></figure>
+
+<p>  <img src="https://img-blog.csdnimg.cn/2a727420e5a94eb881858a272de4c504.png" srcset="/img/loading.gif" lazyload alt="img"> </p>
+<p>解锁：会判断是否是当前线程持有锁</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br></pre></td><td class="code"><pre><code class="hljs java"><span class="hljs-keyword">protected</span> RFuture&lt;Boolean&gt; <span class="hljs-title function_">unlockInnerAsync</span><span class="hljs-params">(<span class="hljs-type">long</span> threadId)</span> &#123;<br>    <span class="hljs-keyword">return</span> evalWriteAsync(getRawName(), LongCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,<br>            <span class="hljs-string">&quot;if (redis.call(&#x27;hexists&#x27;, KEYS[1], ARGV[3]) == 0) then &quot;</span> +  <span class="hljs-comment">// 判断如果存在锁，判断是否同一个线程 ==0说明持有锁的线程不是当前线程</span><br>                    <span class="hljs-string">&quot;return nil;&quot;</span> + <span class="hljs-comment">//返回 nil,抛出释放锁异常</span><br>                    <span class="hljs-string">&quot;end; &quot;</span> +<br>                    <span class="hljs-string">&quot;local counter = redis.call(&#x27;hincrby&#x27;, KEYS[1], ARGV[3], -1); &quot;</span> + <span class="hljs-comment">// 否则，获取当前线程锁的重入次数 -1</span><br>                    <span class="hljs-string">&quot;if (counter &gt; 0) then &quot;</span> +   <span class="hljs-comment">// 如果计数器大于0，说明还在持有锁</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;pexpire&#x27;, KEYS[1], ARGV[2]); &quot;</span> + <span class="hljs-comment">//设置过期时间</span><br>                    <span class="hljs-string">&quot;return 0; &quot;</span> +<br>                    <span class="hljs-string">&quot;else &quot;</span> +   <br>                    <span class="hljs-string">&quot;redis.call(&#x27;del&#x27;, KEYS[1]); &quot;</span> +  <span class="hljs-comment">// 如果计数器&lt;=0，使用del指令删除key</span><br>                    <span class="hljs-string">&quot;redis.call(&#x27;publish&#x27;, KEYS[2], ARGV[1]); &quot;</span> +  <span class="hljs-comment">//往订阅的频道发送message，发送UNLOCK_MESSAGE</span><br>                    <span class="hljs-string">&quot;return 1; &quot;</span> +<br>                    <span class="hljs-string">&quot;end; &quot;</span> +<br>                    <span class="hljs-string">&quot;return nil;&quot;</span>, <span class="hljs-comment">//最后，如果以上的都没走，说明没有锁存在，返回 nil,抛出释放锁异常</span><br>            Arrays.asList(getRawName(), getChannelName()), LockPubSub.UNLOCK_MESSAGE, internalLockLeaseTime, getLockName(threadId));<br>&#125;<br></code></pre></td></tr></table></figure>
+
+
+<h4 id="4-redis锁对比"><a href="#4-redis锁对比" class="headerlink" title="4.redis锁对比"></a>4.redis锁对比</h4><table>
+<thead>
+<tr>
+<th>方式</th>
+<th>学习成本</th>
+<th>复杂度</th>
+<th>可重入</th>
+<th>自动续期</th>
+<th>释放本次线程的锁</th>
+<th>支持过期时间</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>redis原生setNx</td>
+<td>低</td>
+<td>简单</td>
+<td>否</td>
+<td>否</td>
+<td>否</td>
+<td>是</td>
+</tr>
+<tr>
+<td>titans-redisLock</td>
+<td>中</td>
+<td>简单</td>
+<td>否</td>
+<td>否</td>
+<td>是</td>
+<td>否</td>
+</tr>
+<tr>
+<td>redission</td>
+<td>高</td>
+<td>简单</td>
+<td>是</td>
+<td>是</td>
+<td>是</td>
+<td>是</td>
+</tr>
+</tbody></table>
+<h3 id="3-分布式锁对比"><a href="#3-分布式锁对比" class="headerlink" title="3.分布式锁对比"></a>3.分布式锁对比</h3><ul>
+<li>性能对比：          Redis &gt; Zookeeper &gt; 数据库</li>
+<li>学习成本：          Redis &gt;数据库&gt;Zookeeper</li>
+<li>实现复杂度：      数据库&gt;Redis&gt;Zookeeper</li>
+<li>可靠性:                Zookeeper &gt; Redis &gt; 数据库</li>
+</ul>
+
+                
+              </div>
+            
+            <hr/>
+            <div>
+              <div class="post-metas my-3">
+  
+    <div class="post-meta mr-3 d-flex align-items-center">
+      <i class="iconfont icon-category"></i>
+      
+
+<span class="category-chains">
+  
+  
+    
+      <span class="category-chain">
+        
+  <a href="/categories/%E5%88%86%E5%B8%83%E5%BC%8F/" class="category-chain-item">分布式</a>
+  
+  
+
+      </span>
+    
+  
+</span>
+
+    </div>
+  
+  
+    <div class="post-meta">
+      <i class="iconfont icon-tags"></i>
+      
+        <a href="/tags/%E5%88%86%E5%B8%83%E5%BC%8F%E9%94%81/">#分布式锁</a>
+      
+    </div>
+  
+</div>
+
+
+              
+  
+
+  <div class="license-box my-3">
+    <div class="license-title">
+      <div>redis分布式锁</div>
+      <div>http://example.com/2022/12/03/常见分布式锁/</div>
+    </div>
+    <div class="license-meta">
+      
+        <div class="license-meta-item">
+          <div>作者</div>
+          <div>John Doe</div>
+        </div>
+      
+      
+        <div class="license-meta-item license-meta-date">
+          <div>发布于</div>
+          <div>2022年12月3日</div>
+        </div>
+      
+      
+      
+        <div class="license-meta-item">
+          <div>许可协议</div>
+          <div>
+            
+              
+              
+                <a target="_blank" href="https://creativecommons.org/licenses/by/4.0/">
+                  <span class="hint--top hint--rounded" aria-label="BY - 署名">
+                    <i class="iconfont icon-by"></i>
+                  </span>
+                </a>
+              
+            
+          </div>
+        </div>
+      
+    </div>
+    <div class="license-icon iconfont"></div>
+  </div>
+
+
+
+              
+                <div class="post-prevnext my-3">
+                  <article class="post-prev col-6">
+                    
+                    
+                  </article>
+                  <article class="post-next col-6">
+                    
+                    
+                      <a href="/2022/07/03/%E7%AD%96%E7%95%A5+%E6%A8%A1%E6%9D%BF%E6%96%B9%E6%B3%95%E8%AE%BE%E8%AE%A1%E6%A8%A1%E5%BC%8F%E7%9A%84%E7%90%86%E8%A7%A3%E5%92%8C%E5%AE%9E%E6%88%98/" title="redis分布式锁">
+                        <span class="hidden-mobile">redis分布式锁</span>
+                        <span class="visible-mobile">下一篇</span>
+                        <i class="iconfont icon-arrowright"></i>
+                      </a>
+                    
+                  </article>
+                </div>
+              
+            </div>
+
+            
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-col d-none d-lg-block col-lg-2">
+      
+  <aside class="sidebar" style="margin-left: -1rem">
+    <div id="toc">
+  <p class="toc-header">
+    <i class="iconfont icon-list"></i>
+    <span>目录</span>
+  </p>
+  <div class="toc-body" id="toc-body"></div>
+</div>
+
+
+
+  </aside>
+
+
+    </div>
+  </div>
+</div>
+
+
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+  
+
+
+
+
+
+
+
+    
+
+    
+      <a id="scroll-top-button" aria-label="TOP" href="#" role="button">
+        <i class="iconfont icon-arrowup" aria-hidden="true"></i>
+      </a>
+    
+
+    
+      <div class="modal fade" id="modalSearch" tabindex="-1" role="dialog" aria-labelledby="ModalLabel"
+     aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header text-center">
+        <h4 class="modal-title w-100 font-weight-bold">搜索</h4>
+        <button type="button" id="local-search-close" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body mx-3">
+        <div class="md-form mb-5">
+          <input type="text" id="local-search-input" class="form-control validate">
+          <label data-error="x" data-success="v" for="local-search-input">关键词</label>
+        </div>
+        <div class="list-group" id="local-search-result"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+    
+
+    
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+  
+    <div class="footer-content">
+       <a href="https://hexo.io" target="_blank" rel="nofollow noopener"><span>Hexo</span></a> <i class="iconfont icon-love"></i> <a href="https://github.com/fluid-dev/hexo-theme-fluid" target="_blank" rel="nofollow noopener"><span>Fluid</span></a> 
+    </div>
+  
+  
+  
+  
+</div>
+
+  </footer>
+
+  <!-- Scripts -->
+  
+  <script  src="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.js" ></script>
+  <link  rel="stylesheet" href="https://lib.baomitu.com/nprogress/0.2.0/nprogress.min.css" />
+
+  <script>
+    NProgress.configure({"showSpinner":false,"trickleSpeed":100})
+    NProgress.start()
+    window.addEventListener('load', function() {
+      NProgress.done();
+    })
+  </script>
+
+
+<script  src="https://lib.baomitu.com/jquery/3.6.0/jquery.min.js" ></script>
+<script  src="https://lib.baomitu.com/twitter-bootstrap/4.6.1/js/bootstrap.min.js" ></script>
+<script  src="/js/events.js" ></script>
+<script  src="/js/plugins.js" ></script>
+
+
+  <script  src="https://lib.baomitu.com/typed.js/2.0.12/typed.min.js" ></script>
+  <script>
+    (function (window, document) {
+      var typing = Fluid.plugins.typing;
+      var subtitle = document.getElementById('subtitle');
+      if (!subtitle || !typing) {
+        return;
+      }
+      var text = subtitle.getAttribute('data-typed-text');
+      
+        typing(text);
+      
+    })(window, document);
+  </script>
+
+
+
+
+  
+    <script  src="/js/img-lazyload.js" ></script>
+  
+
+
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/tocbot/4.18.2/tocbot.min.js', function() {
+    var toc = jQuery('#toc');
+    if (toc.length === 0 || !window.tocbot) { return; }
+    var boardCtn = jQuery('#board-ctn');
+    var boardTop = boardCtn.offset().top;
+
+    window.tocbot.init(Object.assign({
+      tocSelector     : '#toc-body',
+      contentSelector : '.markdown-body',
+      linkClass       : 'tocbot-link',
+      activeLinkClass : 'tocbot-active-link',
+      listClass       : 'tocbot-list',
+      isCollapsedClass: 'tocbot-is-collapsed',
+      collapsibleClass: 'tocbot-is-collapsible',
+      scrollSmooth    : true,
+      includeTitleTags: true,
+      headingsOffset  : -boardTop,
+    }, CONFIG.toc));
+    if (toc.find('.toc-list-item').length > 0) {
+      toc.css('visibility', 'visible');
+    }
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('tocbot' in window) {
+        tocbot.refresh();
+        var toc = jQuery('#toc');
+        if (toc.length === 0 || !tocbot) {
+          return;
+        }
+        if (toc.find('.toc-list-item').length > 0) {
+          toc.css('visibility', 'visible');
+        }
+      }
+    });
+  });
+</script>
+
+
+  <script src=https://lib.baomitu.com/clipboard.js/2.0.11/clipboard.min.js></script>
+
+  <script>Fluid.plugins.codeWidget();</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/anchor-js/4.3.1/anchor.min.js', function() {
+    window.anchors.options = {
+      placement: CONFIG.anchorjs.placement,
+      visible  : CONFIG.anchorjs.visible
+    };
+    if (CONFIG.anchorjs.icon) {
+      window.anchors.options.icon = CONFIG.anchorjs.icon;
+    }
+    var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+    var res = [];
+    for (var item of el) {
+      res.push('.markdown-body > ' + item.trim());
+    }
+    if (CONFIG.anchorjs.placement === 'left') {
+      window.anchors.options.class = 'anchorjs-link-left';
+    }
+    window.anchors.add(res.join(', '));
+
+    Fluid.events.registerRefreshCallback(function() {
+      if ('anchors' in window) {
+        anchors.removeAll();
+        var el = (CONFIG.anchorjs.element || 'h1,h2,h3,h4,h5,h6').split(',');
+        var res = [];
+        for (var item of el) {
+          res.push('.markdown-body > ' + item.trim());
+        }
+        if (CONFIG.anchorjs.placement === 'left') {
+          anchors.options.class = 'anchorjs-link-left';
+        }
+        anchors.add(res.join(', '));
+      }
+    });
+  });
+</script>
+
+
+  
+<script>
+  Fluid.utils.createScript('https://lib.baomitu.com/fancybox/3.5.7/jquery.fancybox.min.js', function() {
+    Fluid.plugins.fancyBox();
+  });
+</script>
+
+
+  <script>Fluid.plugins.imageCaption();</script>
+
+  <script  src="/js/local-search.js" ></script>
+
+
+
+
+
+<!-- 主题的启动项，将它保持在最底部 -->
+<!-- the boot of the theme, keep it at the bottom -->
+<script  src="/js/boot.js" ></script>
+
+
+  
+
+  <noscript>
+    <div class="noscript-warning">博客在允许 JavaScript 运行的环境下浏览效果更佳</div>
+  </noscript>
+</body>
+</html>
